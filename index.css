@@ -1,0 +1,6 @@
+/* Minimal site CSS - kept intentionally small. Add global rules here if needed. */
+html, body, #root {
+  height: 100%;
+}
+
+/* You can add global utility overrides here if required. */
