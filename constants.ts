@@ -4,6 +4,7 @@ import { Project, ExperienceItem, SkillCategory, Publication, Certification } fr
 const stage2 = new URL('./images/stage2.jpeg', import.meta.url).href;
 const autove = new URL('./images/autove.jpeg', import.meta.url).href;
 const taiwan = new URL('./images/taiwan.jpeg', import.meta.url).href;
+const awsllm = new URL('./images/awsllm.png', import.meta.url).href;
 
 export const BRAND = {
   name: "Karldritz Farrel Hanson",
@@ -22,7 +23,6 @@ export const PROJECTS: Project[] = [
     role: 'Lead AI Engineer',
     impact: 'Final Pitching at Hong Kong; implemented MARL for complete traffic control.',
     image: stage2,
-    githubUrl: '#'
   },
   {
     id: 'autovehicle',
@@ -31,8 +31,7 @@ export const PROJECTS: Project[] = [
     technologies: ['Python', 'NEAT', 'Genetic Algorithms', 'PyGame', 'Neural Networks'],
     role: 'Researcher',
     impact: 'Demonstrated evolutionary strategies for autonomous navigation; lead to a conference publication.',
-    image: autove,
-    githubUrl: '#'
+    image: autove
   },
   {
     id: 'awsllm',
@@ -41,8 +40,8 @@ export const PROJECTS: Project[] = [
     technologies: ['Python', 'AWS Lambda', 'Amazon SageMaker', 'S3', 'LLM'],
     role: 'Cloud Developer',
     impact: 'Seamless integration of serverless architecture with generative AI.',
-    githubUrl: 'https://github.com/kfhanson',
-    image: `https://picsum.photos/seed/awsllm/800/500`
+    githubUrl: 'https://github.com/kfhanson/AWS-LLM-Connector',
+    image: awsllm
   },
   {
     id: 'traffic',
@@ -52,6 +51,7 @@ export const PROJECTS: Project[] = [
     role: 'Researcher',
     impact: 'Combined AI and IoT to improve traffic flow in urban intersections.',
     image: taiwan,
+    githubUrl: 'https://github.com/kfhanson/Reinforcement-Learning-for-Intelligent-Traffic-Signal-Control'
   }
 ];
 
