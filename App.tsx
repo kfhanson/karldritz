@@ -7,6 +7,7 @@ import { Github, Linkedin, Mail, ChevronDown, Terminal, BookOpen, Award, Dumbbel
 import { SectionId } from './types';
 
 function App() {
+  const aboutImage = new URL('./images/aboutme1.jpeg', import.meta.url).href;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const scrollTo = (id: string) => {
@@ -71,7 +72,7 @@ function App() {
               <br className="md:hidden" />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600">Hanson</span>
             </h1>
-            <p className="text-lg md:text-xl text-slate-500 mb-10 font-normal tracking-wide max-w-2xl mx-auto">
+            <p className="text-lg md:text-xl text-slate-500 mb-10 font-normal tracking-wide max-w-2xl mx-auto pixel-font">
               {BRAND.tagline}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -104,7 +105,7 @@ function App() {
                About <span className="text-cyan-500">.</span>
              </h2>
              <p className="text-slate-600 leading-loose text-lg">
-               I am a Computer Science student at <strong className="text-slate-900">BINUS University</strong> and a <strong className="text-slate-900">Solution Architect</strong> at Huawei Cloud Indonesia. 
+               I am a Computer Science student at <strong className="text-slate-900">BINUS University</strong> and a <strong className="text-slate-900">Solution Architect Intern</strong> at Huawei Cloud Indonesia. 
                My academic journey, enriched by a semester at Chang Gung University in Taiwan, has fueled my passion for 
                bridging theoretical AI concepts with practical, scalable cloud solutions.
              </p>
@@ -145,7 +146,7 @@ function App() {
               <div className="absolute inset-0 bg-gradient-to-tr from-cyan-100/50 to-blue-100/50 group-hover:opacity-0 transition-opacity duration-500 z-10"></div>
               {/* Placeholder for user image */}
               <img 
-                src="https://picsum.photos/800/1000?grayscale" 
+                src={aboutImage} 
                 alt="Karldritz Farrel Hanson" 
                 className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700 mix-blend-multiply"
               />

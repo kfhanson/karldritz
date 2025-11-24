@@ -1,6 +1,15 @@
 /* Minimal site CSS - kept intentionally small. Add global rules here if needed. */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
 html, body, #root {
   height: 100%;
+}
+
+/* Pixel font utility. Use the .pixel-font class where you want retro, 8-bit type. */
+.pixel-font {
+  font-family: 'Press Start 2P', ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Segoe UI Mono', monospace;
+  letter-spacing: 0.03em;
+  font-weight: 400;
 }
 
 /* You can add global utility overrides here if required. */
