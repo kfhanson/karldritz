@@ -1,4 +1,9 @@
 import { Project, ExperienceItem, SkillCategory, Publication, Certification } from './types';
+// local project images (importing lets Vite bundle/copy them)
+// Use Vite-compatible URL import to avoid needing image module type declarations
+const stage2 = new URL('./images/stage2.jpeg', import.meta.url).href;
+const autove = new URL('./images/autove.jpeg', import.meta.url).href;
+const taiwan = new URL('./images/taiwan.jpeg', import.meta.url).href;
 
 export const BRAND = {
   name: "Karldritz Farrel Hanson",
@@ -16,6 +21,7 @@ export const PROJECTS: Project[] = [
     technologies: ['Python', 'Huawei Cloud', 'Reinforcement Learning', 'SUMO', 'IoT'],
     role: 'Lead AI Engineer',
     impact: 'Final Pitching at Hong Kong; implemented MARL for complete traffic control.',
+    image: stage2,
     githubUrl: '#'
   },
   {
@@ -25,6 +31,7 @@ export const PROJECTS: Project[] = [
     technologies: ['Python', 'NEAT', 'Genetic Algorithms', 'PyGame', 'Neural Networks'],
     role: 'Researcher',
     impact: 'Demonstrated evolutionary strategies for autonomous navigation; lead to a conference publication.',
+    image: autove,
     githubUrl: '#'
   },
   {
@@ -34,7 +41,8 @@ export const PROJECTS: Project[] = [
     technologies: ['Python', 'AWS Lambda', 'Amazon SageMaker', 'S3', 'LLM'],
     role: 'Cloud Developer',
     impact: 'Seamless integration of serverless architecture with generative AI.',
-    githubUrl: 'https://github.com/kfhanson'
+    githubUrl: 'https://github.com/kfhanson',
+    image: `https://picsum.photos/seed/awsllm/800/500`
   },
   {
     id: 'traffic',
@@ -42,7 +50,8 @@ export const PROJECTS: Project[] = [
     description: 'Traffic Light agent implementing edge computing devices (IoT) using an offline deep reinforcement learning framework for agent training in SUMO simulations.',
     technologies: ['Python', 'Deep Reinforcement Learning', 'IoT', 'SUMO'],
     role: 'Researcher',
-    impact: 'Combined AI and IoT to improve traffic flow in urban intersections.'
+    impact: 'Combined AI and IoT to improve traffic flow in urban intersections.',
+    image: taiwan,
   }
 ];
 

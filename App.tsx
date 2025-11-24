@@ -172,7 +172,7 @@ function App() {
                  <div className="aspect-video w-full bg-white border border-slate-200 rounded-xl overflow-hidden relative shadow-xl group-hover:shadow-cyan-500/20 transition-all">
                     <div className="absolute inset-0 bg-slate-900/10 group-hover:bg-transparent transition-all duration-500 z-10"></div>
                     <img 
-                      src={`https://picsum.photos/seed/${project.id}/800/500?grayscale`} 
+                      src={project.image ?? `https://picsum.photos/seed/${project.id}/800/500?grayscale`} 
                       alt={project.title} 
                       className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-all duration-500 transform group-hover:scale-105"
                     />
