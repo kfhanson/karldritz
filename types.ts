@@ -14,6 +14,8 @@ export interface Project {
   description: string;
   technologies: string[];
   role: string;
+  /** Optional image URL or imported asset for the project card */
+  image?: string;
   impact: string;
   githubUrl?: string;
   demoUrl?: string;
