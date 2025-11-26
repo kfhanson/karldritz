@@ -12,7 +12,7 @@ interface ProjectItemProps {
 const ProjectItem: React.FC<ProjectItemProps> = ({ project, index, onMouseEnter, onMouseLeave }) => {
   return (
     <div 
-      className="relative flex-shrink-0 w-[80vw] md:w-[45vw] h-full flex flex-col justify-center px-8 border-r border-white/10 group hover:bg-white/5 transition-colors duration-500 cursor-none"
+      className="relative flex-shrink-0 w-[100vw] md:w-[40vw] h-full flex flex-col justify-center px-6 sm:px-8 border-r border-white/10 group hover:bg-white/5 transition-colors duration-500 cursor-none"
       onMouseEnter={() => onMouseEnter(project)}
       onMouseLeave={onMouseLeave}
     >
@@ -20,7 +20,15 @@ const ProjectItem: React.FC<ProjectItemProps> = ({ project, index, onMouseEnter,
         <span className="text-sm md:text-md text-gray-500 font-mono">
           0{index + 1} / {project.year}
         </span>
-        <h2 className="text-5xl md:text-7xl font-[700] uppercase font-[Syne] group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-gray-500 transition-all duration-300">
+        <h2
+          className="text-2xl sm:text-3xl md:text-6xl font-[700] uppercase font-[Syne] group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-gray-500 transition-all duration-300 whitespace-normal break-words"
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden'
+          }}
+        >
           {project.title}
         </h2>
         <p className="text-lg md:text-xl text-gray-400 font-light">
@@ -32,7 +40,7 @@ const ProjectItem: React.FC<ProjectItemProps> = ({ project, index, onMouseEnter,
       </Link>
       
       {/* Decorative large background number */}
-      <span className="absolute bottom-0 right-4 text-[20vw] font-[800] opacity-[0.03] leading-none select-none pointer-events-none">
+      <span className="absolute bottom-0 right-4 text-[12vw] md:text-[20vw] font-[800] opacity-[0.03] leading-none select-none pointer-events-none">
         {index + 1}
       </span>
     </div>
