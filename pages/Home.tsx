@@ -15,12 +15,15 @@ const Home: React.FC = () => {
       <div className="relative z-10 bg-[#0a0a0a]">
         <HorizontalScroll />
       </div>
-      <footer className="h-[50vh] flex flex-col justify-center items-center bg-[#0a0a0a] border-t border-white/10">
+      <footer className="h-[50vh] flex flex-col justify-center items-center bg-[#0a0a0a] border-t border-white/10 px-4">
         <p className="text-gray-500 uppercase tracking-widest text-sm mb-4">Get in touch</p>
-        <a href="mailto:kfhanson.2508@gmail.com" className="text-4xl md:text-6xl font-[Syne] font-bold hover:text-gray-300 transition-colors">
+        <a
+          href="mailto:kfhanson.2508@gmail.com"
+          className="text-2xl sm:text-3xl md:text-6xl font-[Syne] font-bold hover:text-gray-300 transition-colors break-words text-center"
+        >
           kfhanson.2508@gmail.com
         </a>
-        <div className="mt-12 text-sm text-gray-600">
+        <div className="mt-12 text-sm text-gray-600 text-center">
           © 2025 Karldritz Farrel Hanson.
         </div>
       </footer>
