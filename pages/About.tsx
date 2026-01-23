@@ -42,8 +42,8 @@ const About: React.FC = () => {
                 <p className="text-gray-500 text-xs mt-1">Sep 2022 - June 2026</p>
              </div>
              <div>
-                <h4 className="text-white font-medium">Chang Gung University</h4>
-                <p className="text-gray-400 text-sm">Study Abroad (Taipei, Taiwan)</p>
+                <h4 className="text-white font-medium">Chang Gung University (Taiwan)</h4>
+                <p className="text-gray-400 text-sm">Study Abroad Program (4.0/4.0 GPA)</p>
                 <p className="text-gray-500 text-xs mt-1">Spring 2025</p>
              </div>
           </div>

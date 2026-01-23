@@ -8,7 +8,7 @@ const Navigation: React.FC = () => {
 
   return (
     <nav className="fixed top-0 left-0 w-full p-8 flex justify-between items-center z-50 mix-blend-difference text-white">
-      <div className="text-xl font-bold tracking-tighter uppercase font-[Syne]">
+      <div className="text-5xl tracking-tighter cactus-font">
         <Link to="/">Karldritz</Link>
       </div>
       <div className="flex gap-8 text-sm uppercase tracking-widest">
