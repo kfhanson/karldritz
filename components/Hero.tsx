@@ -18,6 +18,9 @@ const fsSource = `
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform vec2 u_mouse;
+  uniform vec3 u_colorBase;
+  uniform vec3 u_colorAccent;
+  uniform float u_distortion;
 
   // Simplex 2D noise
   vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
@@ -66,16 +69,16 @@ const fsSource = `
 
       vec2 r = vec2(0.);
       // The mouse position slightly offsets the second noise layer
-      r.x = snoise(st + 1.0 * q + vec2(1.7, 9.2) + 0.15 * t + mouse.x * 0.1);
-      r.y = snoise(st + 1.0 * q + vec2(8.3, 2.8) + 0.126 * t + mouse.y * 0.1);
+      r.x = snoise(st + (1.0 + u_distortion) * q + vec2(1.7, 9.2) + 0.15 * t + mouse.x * 0.1);
+      r.y = snoise(st + (1.0 + u_distortion) * q + vec2(8.3, 2.8) + 0.126 * t + mouse.y * 0.1);
 
       float f = snoise(st + r);
 
       // Color Palette: Dark, minimalist, elegant
-      vec3 color = vec3(0.04, 0.04, 0.04); // Base
+      vec3 color = u_colorBase; // Base
       
       // Mix slightly lighter grey/blue based on noise
-      color = mix(color, vec3(0.12, 0.12, 0.14), clamp(f * f * 3.0, 0.0, 1.0));
+      color = mix(color, u_colorAccent, clamp(f * f * 3.0, 0.0, 1.0));
       
       // Subtle highlights
       color += vec3(0.1) * smoothstep(0.45, 0.55, f) * 0.5;
@@ -84,11 +87,52 @@ const fsSource = `
   }
 `;
 
+type Pallete = {
+  base: [number, number, number];
+  accent: [number, number, number];
+  name: string;
+};
+
+const PALETTES: Pallete[] = [
+  { name: 'Midnight', base: [0.04, 0.04, 0.04], accent: [0.12, 0.12, 0.14] },
+  { name: 'Ember', base: [0.06, 0.02, 0.02], accent: [0.18, 0.08, 0.05] },
+  { name: 'Forest', base: [0.02, 0.04, 0.03], accent: [0.05, 0.12, 0.08] },
+  { name: 'Abyss', base: [0.02, 0.03, 0.06], accent: [0.08, 0.12, 0.22] },
+];
+
 const Hero: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLHeadingElement>(null);
   const subRef = useRef<HTMLParagraphElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [currentPalleteIdx, setCurrentPalleteIdx] = React.useState(0);
+
+  const shaderState = useRef({
+    baseR: PALETTES[0].base[0], baseG: PALETTES[0].base[1], baseB: PALETTES[0].base[2],
+    accentR: PALETTES[0].accent[0], accentG: PALETTES[0].accent[1], accentB: PALETTES[0].accent[2],
+    distortion: 0,
+  })
+
+  const nextTheme = () => {
+    const nextIdx = (currentPalleteIdx + 1) % PALETTES.length;
+    setCurrentPalleteIdx(nextIdx);
+    const target = PALETTES[nextIdx];
+    
+    gsap.to(shaderState.current, {
+      baseR: target.base[0], baseG: target.base[1], baseB: target.base[2],
+      accentR: target.accent[0], accentG: target.accent[1], accentB: target.accent[2],
+      duration: 1.5,
+      ease: "power2.inOut",
+    });
+
+    gsap.to(shaderState.current, {
+      distortion: 1.5,
+      duration: 0.7,
+      yoyo: true,
+      repeat: 1,
+      ease: "power2.out",
+    });
+  };
 
   // WebGL Shader Effect
   useEffect(() => {
@@ -124,7 +168,6 @@ const Hero: React.FC = () => {
     gl.linkProgram(program);
     gl.useProgram(program);
 
-    // Set up geometry (full screen quad)
     const positionLocation = gl.getAttribLocation(program, 'position');
     const buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -140,18 +183,18 @@ const Hero: React.FC = () => {
     const uTime = gl.getUniformLocation(program, 'u_time');
     const uResolution = gl.getUniformLocation(program, 'u_resolution');
     const uMouse = gl.getUniformLocation(program, 'u_mouse');
+    const uColorBase = gl.getUniformLocation(program, 'u_colorBase');
+    const uColorAccent = gl.getUniformLocation(program, 'u_colorAccent');
+    const uDistortion = gl.getUniformLocation(program, 'u_distortion');
 
     let mouseX = 0;
     let mouseY = 0;
-
     const handleMouseMove = (e: MouseEvent) => {
       mouseX = e.clientX;
-      // In WebGL Y is up, in DOM Y is down
       mouseY = canvas.height - e.clientY; 
     };
     window.addEventListener('mousemove', handleMouseMove);
 
-    // Resize handler
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -169,7 +212,9 @@ const Hero: React.FC = () => {
       const time = (Date.now() - startTime) * 0.001;
       gl.uniform1f(uTime, time);
       gl.uniform2f(uMouse, mouseX, mouseY);
-      
+      gl.uniform3f(uColorBase, shaderState.current.baseR, shaderState.current.baseG, shaderState.current.baseB);
+      gl.uniform3f(uColorAccent, shaderState.current.accentR, shaderState.current.accentG, shaderState.current.accentB);
+      gl.uniform1f(uDistortion, shaderState.current.distortion);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       animationId = requestAnimationFrame(render);
     };
@@ -240,7 +285,23 @@ const Hero: React.FC = () => {
           </p>
         </div>
       </div>
-      
+      <div className="absolute bottom-24 left-6 md:left-24 z-20">
+        <button 
+          onClick={nextTheme}
+          className="group flex flex-col items-start gap-1 focus:outline-none"
+        >
+          <span className="text-[10px] uppercase tracking-[0.3em] text-white/40 mb-1 group-hover:text-white/60 transition-colors">
+            Atmosphere
+          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-light uppercase tracking-widest text-white">
+              {PALETTES[currentPalleteIdx].name}
+            </span>
+            <div className="w-8 h-[1px] bg-white/30 group-hover:w-12 transition-all duration-500" />
+            <span className="text-[10px] text-white/50 group-hover:text-white transition-colors">Shift Mood</span>
+          </div>
+        </button>
+      </div>
       <div className="absolute bottom-12 right-12 animate-bounce z-10 pointer-events-none">
         <span className="text-sm uppercase tracking-widest text-white/70">Scroll Down</span>
       </div>

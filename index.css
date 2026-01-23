@@ -13,3 +13,14 @@ html, body, #root {
 }
 
 /* You can add global utility overrides here if required. */
+
+@font-face {
+  font-family: 'CactusJack';
+  src: url('/fonts/Cactus-Jack.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}
+
+.cactus-font {
+  font-family: 'CactusJack';
+}
