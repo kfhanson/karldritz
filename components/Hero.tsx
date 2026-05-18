@@ -1,309 +1,79 @@
-import React, { useEffect, useRef } from 'react';
-import gsap from 'gsap';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import ShaderField from './ShaderField';
+import HeroStickers from './HeroStickers';
 
-// Vertex Shader: Simple pass-through
-const vsSource = `
-  attribute vec2 position;
-  void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-  }
-`;
-
-// Fragment Shader: Domain Warping for Fluid Effect
-const fsSource = `
-  #ifdef GL_ES
-  precision mediump float;
-  #endif
-
-  uniform float u_time;
-  uniform vec2 u_resolution;
-  uniform vec2 u_mouse;
-  uniform vec3 u_colorBase;
-  uniform vec3 u_colorAccent;
-  uniform float u_distortion;
-
-  // Simplex 2D noise
-  vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-
-  float snoise(vec2 v){
-    const vec4 C = vec4(0.211324865405187, 0.366025403784439,
-             -0.577350269189626, 0.024390243902439);
-    vec2 i  = floor(v + dot(v, C.yy) );
-    vec2 x0 = v -   i + dot(i, C.xx);
-    vec2 i1;
-    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-    vec4 x12 = x0.xyxy + C.xxzz;
-    x12.xy -= i1;
-    i = mod(i, 289.0);
-    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
-    + i.x + vec3(0.0, i1.x, 1.0 ));
-    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-    m = m*m ;
-    m = m*m ;
-    vec3 x = 2.0 * fract(p * C.www) - 1.0;
-    vec3 h = abs(x) - 0.5;
-    vec3 ox = floor(x + 0.5);
-    vec3 a0 = x - ox;
-    m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
-    vec3 g;
-    g.x  = a0.x  * x0.x  + h.x  * x0.y;
-    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-    return 130.0 * dot(m, g);
-  }
-
-  void main() {
-      vec2 st = gl_FragCoord.xy / u_resolution.xy;
-      // Correct aspect ratio
-      st.x *= u_resolution.x / u_resolution.y;
-      
-      // Mouse interaction
-      vec2 mouse = u_mouse / u_resolution.xy;
-      mouse.x *= u_resolution.x / u_resolution.y;
-
-      float t = u_time * 0.15;
-      
-      // Domain Warping
-      vec2 q = vec2(0.);
-      q.x = snoise(st + vec2(0.0, t));
-      q.y = snoise(st + vec2(1.0, t));
-
-      vec2 r = vec2(0.);
-      // The mouse position slightly offsets the second noise layer
-      r.x = snoise(st + (1.0 + u_distortion) * q + vec2(1.7, 9.2) + 0.15 * t + mouse.x * 0.1);
-      r.y = snoise(st + (1.0 + u_distortion) * q + vec2(8.3, 2.8) + 0.126 * t + mouse.y * 0.1);
-
-      float f = snoise(st + r);
-
-      // Color Palette: Dark, minimalist, elegant
-      vec3 color = u_colorBase; // Base
-      
-      // Mix slightly lighter grey/blue based on noise
-      color = mix(color, u_colorAccent, clamp(f * f * 3.0, 0.0, 1.0));
-      
-      // Subtle highlights
-      color += vec3(0.1) * smoothstep(0.45, 0.55, f) * 0.5;
-
-      gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-type Pallete = {
-  base: [number, number, number];
-  accent: [number, number, number];
-  name: string;
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  show: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.12, duration: 0.6, ease: [0.22, 1, 0.36, 1] },
+  }),
 };
 
-const PALETTES: Pallete[] = [
-  { name: 'Midnight', base: [0.04, 0.04, 0.04], accent: [0.12, 0.12, 0.14] },
-  { name: 'Ember', base: [0.06, 0.02, 0.02], accent: [0.18, 0.08, 0.05] },
-  { name: 'Forest', base: [0.02, 0.04, 0.03], accent: [0.05, 0.12, 0.08] },
-  { name: 'Abyss', base: [0.02, 0.03, 0.06], accent: [0.08, 0.12, 0.22] },
-];
-
 const Hero: React.FC = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLHeadingElement>(null);
-  const subRef = useRef<HTMLParagraphElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [currentPalleteIdx, setCurrentPalleteIdx] = React.useState(0);
-
-  const shaderState = useRef({
-    baseR: PALETTES[0].base[0], baseG: PALETTES[0].base[1], baseB: PALETTES[0].base[2],
-    accentR: PALETTES[0].accent[0], accentG: PALETTES[0].accent[1], accentB: PALETTES[0].accent[2],
-    distortion: 0,
-  })
-
-  const nextTheme = () => {
-    const nextIdx = (currentPalleteIdx + 1) % PALETTES.length;
-    setCurrentPalleteIdx(nextIdx);
-    const target = PALETTES[nextIdx];
-    
-    gsap.to(shaderState.current, {
-      baseR: target.base[0], baseG: target.base[1], baseB: target.base[2],
-      accentR: target.accent[0], accentG: target.accent[1], accentB: target.accent[2],
-      duration: 1.5,
-      ease: "power2.inOut",
-    });
-
-    gsap.to(shaderState.current, {
-      distortion: 1.5,
-      duration: 0.7,
-      yoyo: true,
-      repeat: 1,
-      ease: "power2.out",
-    });
-  };
-
-  // WebGL Shader Effect
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const gl = canvas.getContext('webgl');
-    if (!gl) return;
-
-    // Compile Shader Function
-    const compileShader = (source: string, type: number) => {
-      const shader = gl.createShader(type);
-      if (!shader) return null;
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader compile failed:', gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-        return null;
-      }
-      return shader;
-    };
-
-    const vertexShader = compileShader(vsSource, gl.VERTEX_SHADER);
-    const fragmentShader = compileShader(fsSource, gl.FRAGMENT_SHADER);
-
-    if (!vertexShader || !fragmentShader) return;
-
-    const program = gl.createProgram();
-    if (!program) return;
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-    gl.useProgram(program);
-
-    const positionLocation = gl.getAttribLocation(program, 'position');
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0]),
-      gl.STATIC_DRAW
-    );
-    gl.enableVertexAttribArray(positionLocation);
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-
-    // Uniform locations
-    const uTime = gl.getUniformLocation(program, 'u_time');
-    const uResolution = gl.getUniformLocation(program, 'u_resolution');
-    const uMouse = gl.getUniformLocation(program, 'u_mouse');
-    const uColorBase = gl.getUniformLocation(program, 'u_colorBase');
-    const uColorAccent = gl.getUniformLocation(program, 'u_colorAccent');
-    const uDistortion = gl.getUniformLocation(program, 'u_distortion');
-
-    let mouseX = 0;
-    let mouseY = 0;
-    const handleMouseMove = (e: MouseEvent) => {
-      mouseX = e.clientX;
-      mouseY = canvas.height - e.clientY; 
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.uniform2f(uResolution, canvas.width, canvas.height);
-    };
-    window.addEventListener('resize', resize);
-    resize();
-
-    // Animation Loop
-    let animationId: number;
-    const startTime = Date.now();
-
-    const render = () => {
-      const time = (Date.now() - startTime) * 0.001;
-      gl.uniform1f(uTime, time);
-      gl.uniform2f(uMouse, mouseX, mouseY);
-      gl.uniform3f(uColorBase, shaderState.current.baseR, shaderState.current.baseG, shaderState.current.baseB);
-      gl.uniform3f(uColorAccent, shaderState.current.accentR, shaderState.current.accentG, shaderState.current.accentB);
-      gl.uniform1f(uDistortion, shaderState.current.distortion);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-      animationId = requestAnimationFrame(render);
-    };
-    render();
-
-    return () => {
-      window.removeEventListener('resize', resize);
-      window.removeEventListener('mousemove', handleMouseMove);
-      cancelAnimationFrame(animationId);
-    };
-  }, []);
-
-  // Text Animations (GSAP)
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      const tl = gsap.timeline();
-
-      // Split text animation simulation
-      const chars = textRef.current?.querySelectorAll('.char');
-      
-      if (chars && chars.length > 0) {
-          tl.from(chars, {
-            y: 100,
-            opacity: 0,
-            skewY: 10,
-            duration: 1,
-            stagger: 0.05,
-            ease: "power4.out",
-          });
-      }
-
-      tl.from(subRef.current, {
-        y: 20,
-        opacity: 0,
-        duration: 1,
-        ease: "power2.out"
-      }, "-=0.5");
-
-    }, containerRef);
-
-    return () => ctx.revert();
-  }, []);
-
-  const splitText = (text: string) => {
-    return text.split('').map((char, index) => (
-      <span key={index} className="char inline-block whitespace-pre">
-        {char}
-      </span>
-    ));
-  };
-
   return (
-    <section ref={containerRef} className="relative h-screen flex flex-col justify-center items-start px-8 md:px-24 overflow-hidden">
-      {/* Background Shader */}
-      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full z-0 block" />
+    <section
+      aria-label="Introduction"
+      className="relative min-h-screen flex flex-col justify-end pb-16 px-6 md:px-10 lg:px-16 pt-32 overflow-hidden bg-[#0a0a0a]"
+    >
+      <ShaderField />
+      <HeroStickers />
 
-      {/* Text Content - Positioned Above Canvas */}
-      <div className="relative z-10 pointer-events-none mix-blend-screen">
-        <div className="overflow-hidden">
-          <h1 ref={textRef} className="text-6xl md:text-[9vw] font-[800] leading-[0.9] tracking-tighter uppercase mb-6 text-white">
-            {splitText("Karldritz")} <br />
-            {splitText("F. Hanson")}
-          </h1>
-        </div>
-        <div className="overflow-hidden">
-          <p ref={subRef} className="text-xl md:text-2xl opacity-80 max-w-lg font-light text-gray-200">
-            Computer Science Undergraduate based in Jakarta, Indonesia.
-          </p>
-        </div>
-      </div>
-      <div className="absolute bottom-24 left-6 md:left-24 z-20">
-        <button 
-          onClick={nextTheme}
-          className="group flex flex-col items-start gap-1 focus:outline-none"
+      <div className="relative z-10 max-w-[1280px] mx-auto w-full">
+
+        <motion.p
+          custom={0}
+          initial="hidden"
+          animate="show"
+          variants={fadeUp}
+          className="font-mono text-xs text-white/50 uppercase tracking-widest mb-8"
         >
-          <span className="text-[10px] uppercase tracking-[0.3em] text-white/40 mb-1 group-hover:text-white/60 transition-colors">
-            Atmosphere
-          </span>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-light uppercase tracking-widest text-white">
-              {PALETTES[currentPalleteIdx].name}
-            </span>
-            <div className="w-8 h-[1px] bg-white/30 group-hover:w-12 transition-all duration-500" />
-            <span className="text-[10px] text-white/50 group-hover:text-white transition-colors">Shift Mood</span>
+          Applied AI — Jakarta, Indonesia
+        </motion.p>
+
+        <motion.h1
+          custom={1}
+          initial="hidden"
+          animate="show"
+          variants={fadeUp}
+          className="font-display text-[clamp(3.5rem,9vw,8.5rem)] leading-[0.92] tracking-tight text-white mb-10"
+        >
+          I build AI<br />
+          that learns<br />
+          from the world.
+        </motion.h1>
+
+        <motion.div
+          custom={2}
+          initial="hidden"
+          animate="show"
+          variants={fadeUp}
+          className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-t border-white/15 pt-8"
+        >
+          <p className="font-sans text-sm text-white/60 max-w-sm leading-relaxed">
+            I'm Karldritz Hanson — reinforcement learning, agentic systems, and applied AI for the real world.
+            <br />
+            AI Engineer Intern at Sertis Teknologi Indonesia.
+          </p>
+          <div className="flex items-center gap-6 flex-shrink-0">
+            <Link
+              to="/about"
+              className="font-sans text-sm text-white/70 border-b border-white/30 pb-0.5 hover:text-white hover:border-white transition-colors duration-200"
+            >
+              About me
+            </Link>
+            <a
+              href="mailto:kfhanson.2508@gmail.com"
+              className="font-sans text-sm text-white/70 border-b border-white/30 pb-0.5 hover:text-white hover:border-white transition-colors duration-200"
+            >
+              Get in touch
+            </a>
           </div>
-        </button>
-      </div>
-      <div className="absolute bottom-12 right-12 animate-bounce z-10 pointer-events-none">
-        <span className="text-sm uppercase tracking-widest text-white/70">Scroll Down</span>
+        </motion.div>
+
       </div>
     </section>
   );
