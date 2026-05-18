@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
+const huaweiSummit = new URL('../images/photocards/huawei-summit.jpeg', import.meta.url).href;
+const apacFinalist = new URL('../images/photocards/apac-finalist.jpeg', import.meta.url).href;
+const alibabaHackathon = new URL('../images/photocards/alibaba-hackathon.jpeg', import.meta.url).href;
+
 interface Photocard {
   id: string;
   image: string;
@@ -14,7 +18,7 @@ interface Photocard {
 const PHOTOCARDS: Photocard[] = [
   {
     id: 'apac-finalist',
-    image: '/images/huawei-summit.jpeg',
+    image: apacFinalist,
     caption: '🏆 APAC Grand Finalist',
     rotate: -4,
     delay: 0.3,
@@ -23,7 +27,7 @@ const PHOTOCARDS: Photocard[] = [
   },
   {
     id: 'huawei-summit',
-    image: '/images/photocards/apac-finalist.jpeg',
+    image: huaweiSummit,
     caption: '☁️ Huawei Cloud Summit',
     rotate: 3,
     delay: 0.45,
@@ -32,7 +36,7 @@ const PHOTOCARDS: Photocard[] = [
   },
   {
     id: 'alibaba-hackathon',
-    image: '/images/photocards/alibaba-hackathon.jpeg',
+    image: alibabaHackathon,
     caption: '🥈 2nd Winner — Alibaba Hackathon',
     rotate: -2,
     delay: 0.6,
