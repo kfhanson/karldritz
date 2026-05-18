@@ -14,7 +14,7 @@ interface Photocard {
 const PHOTOCARDS: Photocard[] = [
   {
     id: 'apac-finalist',
-    image: '/images/photocards/huawei-summit.jpeg',
+    image: '/images/huawei-summit.jpeg',
     caption: '🏆 APAC Grand Finalist',
     rotate: -4,
     delay: 0.3,
