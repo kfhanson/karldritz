@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ShaderField from './ShaderField';
-import HeroStickers from './HeroStickers';
+import PhotoCard from './PhotoCard';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -20,7 +20,6 @@ const Hero: React.FC = () => {
       className="relative min-h-screen flex flex-col justify-end pb-16 px-6 md:px-10 lg:px-16 pt-32 overflow-hidden bg-[#0a0a0a]"
     >
       <ShaderField />
-      <HeroStickers />
 
       <div className="relative z-10 max-w-[1280px] mx-auto w-full">
 
@@ -34,17 +33,24 @@ const Hero: React.FC = () => {
           Applied AI — Jakarta, Indonesia
         </motion.p>
 
-        <motion.h1
-          custom={1}
-          initial="hidden"
-          animate="show"
-          variants={fadeUp}
-          className="font-display text-[clamp(3.5rem,9vw,8.5rem)] leading-[0.92] tracking-tight text-white mb-10"
-        >
-          I build AI<br />
-          that learns<br />
-          from the world.
-        </motion.h1>
+        {/* Headline + card side by side */}
+        <div className="lg:grid lg:grid-cols-[1fr_auto] lg:items-start lg:gap-12 mb-10">
+          <motion.h1
+            custom={1}
+            initial="hidden"
+            animate="show"
+            variants={fadeUp}
+            className="font-display text-[clamp(3.5rem,9vw,8.5rem)] leading-[0.92] tracking-tight text-white"
+          >
+            I build AI<br />
+            that learns<br />
+            from the world.
+          </motion.h1>
+
+          <div className="hidden lg:block" aria-hidden="true">
+            <PhotoCard />
+          </div>
+        </div>
 
         <motion.div
           custom={2}

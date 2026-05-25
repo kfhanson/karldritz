@@ -14,7 +14,6 @@ const fsSource = `
 
   uniform float u_time;
   uniform vec2 u_resolution;
-  uniform vec2 u_mouse;
 
   vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
 
@@ -45,9 +44,6 @@ const fsSource = `
     vec2 st = gl_FragCoord.xy / u_resolution.xy;
     st.x *= u_resolution.x / u_resolution.y;
 
-    vec2 mouse = u_mouse / u_resolution.xy;
-    mouse.x *= u_resolution.x / u_resolution.y;
-
     float t = u_time * 0.15;
 
     vec2 q = vec2(0.0);
@@ -55,8 +51,8 @@ const fsSource = `
     q.y = snoise(st + vec2(1.0, t));
 
     vec2 r = vec2(0.0);
-    r.x = snoise(st + q + vec2(1.7, 9.2) + 0.15 * t + mouse.x * 0.1);
-    r.y = snoise(st + q + vec2(8.3, 2.8) + 0.126 * t + mouse.y * 0.1);
+    r.x = snoise(st + q + vec2(1.7, 9.2) + 0.15 * t);
+    r.y = snoise(st + q + vec2(8.3, 2.8) + 0.126 * t);
 
     float f = snoise(st + r);
 
@@ -105,15 +101,6 @@ const ShaderField: React.FC = () => {
 
     const uTime = gl.getUniformLocation(program, 'u_time');
     const uResolution = gl.getUniformLocation(program, 'u_resolution');
-    const uMouse = gl.getUniformLocation(program, 'u_mouse');
-
-    let mouseX = 0;
-    let mouseY = 0;
-    const handleMouseMove = (e: MouseEvent) => {
-      mouseX = e.clientX;
-      mouseY = canvas.height - e.clientY;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
 
     const resize = () => {
       canvas.width = window.innerWidth;
@@ -129,7 +116,6 @@ const ShaderField: React.FC = () => {
 
     const drawFrame = () => {
       gl.uniform1f(uTime, (Date.now() - startTime) * 0.001);
-      gl.uniform2f(uMouse, mouseX, mouseY);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
 
@@ -147,7 +133,6 @@ const ShaderField: React.FC = () => {
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener('resize', resize);
-      window.removeEventListener('mousemove', handleMouseMove);
     };
   }, []);
 
