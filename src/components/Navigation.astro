@@ -1,0 +1,43 @@
+---
+import { url } from '../scripts/url';
+
+interface Props {
+  darkHero?: boolean;
+}
+
+const { darkHero = false } = Astro.props;
+const path = Astro.url.pathname.replace(import.meta.env.BASE_URL.replace(/\/$/, ''), '') || '/';
+const isHome = path === '/' || path === '';
+const isAbout = path.startsWith('/about');
+---
+
+<a href="#main-content" class="skip-link">Skip to content</a>
+<nav
+  id="site-nav"
+  data-dark-hero={darkHero ? 'true' : 'false'}
+  class:list={[
+    'fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 md:px-10 lg:px-16 py-5',
+    darkHero && 'nav-dark',
+    darkHero && 'nav-intro',
+  ]}
+>
+  <a href={url('/')} class="nav-brand cactus-font text-2xl">
+    Karldritz Hanson
+  </a>
+  <div class="flex items-center gap-8">
+    <a
+      href={url('/')}
+      aria-current={isHome ? 'page' : undefined}
+      class="nav-link text-sm font-sans"
+    >
+      Work
+    </a>
+    <a
+      href={url('/about/')}
+      aria-current={isAbout ? 'page' : undefined}
+      class="nav-link text-sm font-sans"
+    >
+      About
+    </a>
+  </div>
+</nav>
