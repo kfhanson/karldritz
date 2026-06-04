@@ -1,0 +1,203 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #F6F5F1;
+  --color-ink: #111111;
+  --color-ink-muted: #6B6B66;
+  --color-wire: #E5E2DA;
+  --color-panel: #EFEDE6;
+  --color-pine: #2E4D3A;
+
+  --font-display: 'Fraunces', ui-serif, Georgia, serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@font-face {
+  font-family: 'CactusJack';
+  src: url('../fonts/Cactus-Jack.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+.cactus-font {
+  font-family: 'CactusJack', ui-serif, Georgia, serif;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  overflow-x: hidden;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-pine);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
+/* Skip-to-content link — visible only on keyboard focus */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: #111111;
+  color: #F6F5F1;
+  font-size: 0.875rem;
+  font-family: var(--font-sans);
+  border-radius: 0 0 4px 4px;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* ── Staggered fade-up on load (delay via --d) ── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-up {
+  opacity: 0;
+  animation: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+.fade-up-1 { --d: 0.12s; }
+.fade-up-2 { --d: 0.24s; }
+
+/* ── First-load hero entrance: shader establishes, then content layers in ──
+   Timeline: shader 0.15–1.05s · eyebrow 0.8s · headline words 0.9–1.46s
+   (0.08s stagger) · meta row 1.7s · nav 1.8s. Repeat visits compress 4×. */
+@keyframes shader-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.shader-fade {
+  opacity: 0;
+  animation: shader-in 0.9s ease-out forwards;
+  animation-delay: var(--d, 0.15s);
+}
+
+@keyframes line-up {
+  0%   { transform: translateY(110%); opacity: 0; }
+  40%  { opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.line-mask {
+  display: block;
+}
+
+/* Per-word clip mask — each word slides up out of its own invisible window */
+.word-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.word-mask > span {
+  display: inline-block;
+  transform: translateY(110%);
+  opacity: 0;
+  will-change: transform, opacity;
+  /* easeOutExpo: long deceleration tail reads as silky */
+  animation: line-up 1.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation-delay: var(--d, 0s);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.nav-intro {
+  opacity: 0;
+  animation: fade-in 0.5s ease-out forwards;
+  animation-delay: var(--d, 1.8s);
+}
+
+/* Same session, seen it already → play the whole sequence ~4× faster */
+html.intro-played .hero-intro .fade-up,
+html.intro-played .hero-intro .word-mask > span,
+html.intro-played .shader-fade,
+html.intro-played .nav-intro {
+  animation-delay: calc(var(--d, 0s) / 4);
+  animation-duration: 0.4s;
+}
+
+/* ── Scroll reveal: toggled by IntersectionObserver ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* No-JS fallback: never hide content if scripts fail to load */
+html.no-js .reveal,
+html.no-js .fade-up,
+html.no-js .shader-fade,
+html.no-js .nav-intro,
+html.no-js .word-mask > span {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+/* ── Navigation states (toggled by script) ── */
+#site-nav {
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+  border-bottom: 1px solid transparent;
+}
+
+#site-nav.nav-scrolled {
+  border-bottom-color: var(--color-wire);
+  background-color: rgb(246 245 241 / 0.95);
+  backdrop-filter: blur(4px);
+}
+
+/* Light-on-dark variant while over the home hero */
+#site-nav .nav-brand { color: var(--color-ink); transition: color 0.3s ease; }
+#site-nav .nav-brand:hover { color: var(--color-pine); }
+#site-nav .nav-link { color: var(--color-ink-muted); transition: color 0.3s ease; }
+#site-nav .nav-link:hover { color: var(--color-ink); }
+#site-nav .nav-link[aria-current="page"] { color: var(--color-ink); }
+
+#site-nav.nav-dark .nav-brand { color: #ffffff; }
+#site-nav.nav-dark .nav-brand:hover { color: rgb(255 255 255 / 0.7); }
+#site-nav.nav-dark .nav-link { color: rgb(255 255 255 / 0.6); }
+#site-nav.nav-dark .nav-link:hover { color: #ffffff; }
+#site-nav.nav-dark .nav-link[aria-current="page"] { color: #ffffff; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal, .fade-up, .shader-fade, .nav-intro, .word-mask > span {
+    opacity: 1;
+    transform: none;
+  }
+}

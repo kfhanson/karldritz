@@ -1,0 +1,63 @@
+---
+import { ClientRouter } from 'astro:transitions';
+import Navigation from '../components/Navigation.astro';
+import { url } from '../scripts/url';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  ogImage?: string;
+  darkHero?: boolean;
+}
+
+const { title, description, ogImage, darkHero = false } = Astro.props;
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
+const ogImageUrl = ogImage && Astro.site ? new URL(ogImage, Astro.site).href : undefined;
+---
+
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {canonical && <link rel="canonical" href={canonical} />}
+
+    <!-- Open Graph / link previews -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    {ogImageUrl && <meta property="og:image" content={ogImageUrl} />}
+    <meta name="twitter:card" content={ogImageUrl ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <!-- Fraunces (display serif) + Inter (body) + JetBrains Mono (code) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..500&family=Inter:wght@300..600&family=JetBrains+Mono:wght@400&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="icon" href={url('/favicon.ico')} type="image/x-icon" />
+    <script is:inline>
+      document.documentElement.classList.remove('no-js');
+      // Compress the hero entrance if it already played this session
+      try {
+        if (sessionStorage.getItem('introPlayed')) {
+          document.documentElement.classList.add('intro-played');
+        }
+      } catch {}
+    </script>
+    <ClientRouter />
+  </head>
+  <body class="relative w-full min-h-screen bg-canvas text-ink">
+    <Navigation darkHero={darkHero} />
+    <slot />
+    <script src="../scripts/main.ts"></script>
+  </body>
+</html>

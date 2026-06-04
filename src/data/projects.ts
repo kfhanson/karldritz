@@ -1,16 +1,32 @@
-import { Project } from '../types';
+import type { ImageMetadata } from 'astro';
 
-const flow = new URL('../images/stage2.jpeg', import.meta.url).href;
-const traffic = new URL('../images/taiwan.jpeg', import.meta.url).href;
-const av = new URL('../images/autove.jpeg', import.meta.url).href;
-const aws = new URL('../images/awsllm.png', import.meta.url).href;
-const cuancerdas = new URL('../images/cuancerdas.png', import.meta.url).href;
-const porto = new URL('../images/portofolio.png', import.meta.url).href;
-const mag = new URL('../images/magnifier.png', import.meta.url).href;
+import flow from '../images/stage2.jpeg';
+import traffic from '../images/taiwan.jpeg';
+import av from '../images/autove.jpeg';
+import aws from '../images/awsllm.png';
+import cuancerdas from '../images/cuancerdas.jpeg';
+import porto from '../images/portofolio.jpeg';
+import mag from '../images/magnifier.jpeg';
+
+export interface Project {
+  slug: string;
+  title: string;
+  category: string;
+  year: string;
+  image: ImageMetadata;
+  description?: string;
+  fullDescription?: string[];
+  techStack?: string[];
+  role?: string;
+  link?: string;
+  github?: string;
+  featured?: boolean;
+  hidden?: boolean;
+}
 
 export const projects: Project[] = [
   {
-    id: 1,
+    slug: 'flowai',
     title: 'FlowAI',
     category: 'Reinforcement Learning / IoT',
     year: '2025',
@@ -26,7 +42,7 @@ export const projects: Project[] = [
     techStack: ['Python', 'Huawei Cloud', 'SUMO', 'Reinforcement Learning', 'MARL', 'IoT'],
   },
   {
-    id: 2,
+    slug: 'aws-agent',
     title: 'AWS Agent',
     category: 'Agentic LLM / Cloud',
     year: '2024',
@@ -43,7 +59,7 @@ export const projects: Project[] = [
     github: 'https://github.com/kfhanson/AWS-LLM-Connector',
   },
   {
-    id: 3,
+    slug: 'cuancerdas',
     title: 'CuanCerdas',
     category: 'Agentic LLM / FinTech',
     year: '2026',
@@ -59,7 +75,7 @@ export const projects: Project[] = [
     techStack: ['LLM', 'Alibaba Cloud', 'AI Agent', 'FinTech', 'Full Stack Development'],
   },
   {
-    id: 4,
+    slug: 'intelligent-traffic',
     title: 'Intelligent Traffic',
     category: 'Deep Reinforcement Learning / IoT',
     year: '2025',
@@ -76,7 +92,7 @@ export const projects: Project[] = [
     github: 'https://github.com/kfhanson/Reinforcement-Learning-for-Intelligent-Traffic-Signal-Control',
   },
   {
-    id: 5,
+    slug: 'av-simulation',
     title: 'AV Simulation',
     category: 'Neural Evolution / AI',
     year: '2024',
@@ -92,7 +108,7 @@ export const projects: Project[] = [
     techStack: ['Python', 'NEAT', 'PyGame', 'Genetic Algorithms', 'Neural Networks'],
   },
   {
-    id: 6,
+    slug: 'image-magnifier',
     title: 'Image Magnifier',
     category: 'Web Tool',
     year: '2024',
@@ -109,7 +125,7 @@ export const projects: Project[] = [
     github: 'https://github.com/kfhanson/image-magnifier',
   },
   {
-    id: 7,
+    slug: 'portfolio',
     title: "Karldritz's Portfolio",
     category: 'Web Dev',
     year: '2025',
@@ -118,9 +134,11 @@ export const projects: Project[] = [
     role: 'Frontend Developer',
     description: 'This site — minimal, editorial, AI-forward.',
     fullDescription: [
-      'A minimal, editorial portfolio built with React 19, TypeScript, Vite, Tailwind, Framer Motion, and Lenis smooth scroll.',
+      'A minimal, editorial portfolio built with Astro, TypeScript, Tailwind CSS, and Lenis smooth scroll.',
     ],
-    techStack: ['React', 'TypeScript', 'Vite', 'Tailwind CSS', 'Framer Motion'],
+    techStack: ['Astro', 'TypeScript', 'Tailwind CSS', 'Lenis'],
     link: 'https://kfhanson.github.io/karldritz/',
   },
 ];
+
+export const visibleProjects = projects.filter(p => !p.hidden);
