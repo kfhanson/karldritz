@@ -131,15 +131,6 @@ body {
   animation-delay: var(--d, 1.8s);
 }
 
-/* Same session, seen it already → play the whole sequence ~4× faster */
-html.intro-played .hero-intro .fade-up,
-html.intro-played .hero-intro .word-mask > span,
-html.intro-played .shader-fade,
-html.intro-played .nav-intro {
-  animation-delay: calc(var(--d, 0s) / 4);
-  animation-duration: 0.4s;
-}
-
 /* ── Scroll reveal: toggled by IntersectionObserver ── */
 .reveal {
   opacity: 0;
@@ -189,6 +180,226 @@ html.no-js .word-mask > span {
 #site-nav.nav-dark .nav-link { color: rgb(255 255 255 / 0.6); }
 #site-nav.nav-dark .nav-link:hover { color: #ffffff; }
 #site-nav.nav-dark .nav-link[aria-current="page"] { color: #ffffff; }
+
+/* ── Coverflow carousel — active card large, neighbours collapse to slats ── */
+.coverflow {
+  position: relative;
+  overflow: hidden;
+  /* Height follows a 16:9 active card; JS sets the exact px on load. */
+  height: calc(clamp(300px, 90vw, 760px) * 0.5625);
+}
+
+.coverflow-track {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.coverflow-card {
+  flex: 0 0 auto;
+  width: 64px; /* sensible pre-JS default; JS sets real widths on load */
+  height: 84%;
+  overflow: hidden;
+  border-radius: 1rem;
+  transition:
+    width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    margin 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.4s ease;
+}
+
+.coverflow-card[data-slide='0'] {
+  width: clamp(300px, 90vw, 760px); /* first card large + 16:9 at first paint */
+  height: 100%;
+}
+
+.coverflow-card img,
+.coverflow-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.coverflow.no-anim .coverflow-track,
+.coverflow.no-anim .coverflow-card {
+  transition: none;
+}
+
+.cf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  background: var(--color-panel);
+  border: 1px solid var(--color-wire);
+  color: var(--color-ink);
+  font-size: 1.25rem;
+  line-height: 1;
+  transition: background-color 0.2s ease, color 0.2s ease, opacity 0.25s ease;
+}
+
+/* On hover-capable devices, hide the arrows until the carousel is hovered or
+   focused. Touch devices (no hover) keep them visible — swipe also works. */
+@media (hover: hover) {
+  .coverflow-wrap .cf-btn {
+    opacity: 0;
+  }
+  .coverflow-wrap:hover .cf-btn,
+  .coverflow-wrap:focus-within .cf-btn {
+    opacity: 1;
+  }
+}
+
+.cf-btn:hover:not(:disabled) {
+  background: var(--color-ink);
+  color: var(--color-canvas);
+}
+
+.cf-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coverflow-track,
+  .coverflow-card {
+    transition: none;
+  }
+}
+
+/* No-JS fallback: degrade to a simple stacked gallery */
+html.no-js .coverflow {
+  overflow: visible;
+  height: auto !important;
+}
+html.no-js .coverflow-track {
+  flex-direction: column;
+  transform: none !important;
+}
+html.no-js .coverflow-card {
+  width: 100% !important;
+  height: auto !important;
+  margin: 0 0 1rem !important;
+}
+html.no-js .coverflow-card img,
+html.no-js .coverflow-card video {
+  height: auto;
+}
+html.no-js .cf-btn {
+  display: none;
+}
+
+/* ── Case-study (MDX) prose ── */
+.case-study {
+  font-family: var(--font-sans);
+  color: var(--color-ink-muted);
+}
+
+.case-study > * + * {
+  margin-top: 1.5rem;
+}
+
+.case-study h2 {
+  font-family: var(--font-display);
+  color: var(--color-ink);
+  font-size: 1.5rem;
+  line-height: 1.2;
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-wire);
+}
+
+.case-study h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.case-study h3 {
+  font-family: var(--font-display);
+  color: var(--color-ink);
+  font-size: 1.125rem;
+  margin-top: 2rem;
+}
+
+.case-study p,
+.case-study li {
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.case-study a {
+  color: var(--color-pine);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.case-study strong {
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.case-study ul,
+.case-study ol {
+  padding-left: 1.25rem;
+}
+
+.case-study ul { list-style: disc; }
+.case-study ol { list-style: decimal; }
+
+.case-study li + li {
+  margin-top: 0.5rem;
+}
+
+.case-study blockquote {
+  border-left: 2px solid var(--color-pine);
+  padding-left: 1.25rem;
+  color: var(--color-ink);
+  font-style: italic;
+}
+
+.case-study pre {
+  background: #0f0f0f;
+  color: #e8e8e8;
+  border-radius: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.case-study :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-panel);
+  border: 1px solid var(--color-wire);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+}
+
+.case-study pre code {
+  font-family: var(--font-mono);
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.case-study img {
+  border-radius: 0.5rem;
+  width: 100%;
+}
+
+.case-study figure figcaption {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-ink-muted);
+  text-align: center;
+  margin-top: 0.75rem;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

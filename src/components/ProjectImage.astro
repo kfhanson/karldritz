@@ -1,0 +1,68 @@
+---
+import { Image } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+
+interface Props {
+  main: ImageMetadata;
+  hoverImage?: ImageMetadata;
+  hoverVideo?: { mp4: string; webm?: string; poster: string };
+  alt: string;
+  heightClass: string;
+  widths: number[];
+  sizes: string;
+  loading?: 'eager' | 'lazy';
+}
+
+const { main, hoverImage, hoverVideo, alt, heightClass, widths, sizes, loading = 'lazy' } =
+  Astro.props;
+const hasHover = Boolean(hoverImage || hoverVideo);
+---
+
+<div class="group/img relative w-full overflow-hidden">
+  <Image
+    src={main}
+    alt={alt}
+    widths={widths}
+    sizes={sizes}
+    loading={loading}
+    class:list={[
+      heightClass,
+      'w-full object-cover transition-all duration-500',
+      // With a hover asset we crossfade to it; without one, keep the subtle zoom.
+      hasHover ? 'group-hover/img:opacity-0' : 'group-hover/img:scale-[1.02]',
+    ]}
+  />
+
+  {hoverImage && (
+    <Image
+      src={hoverImage}
+      alt=""
+      aria-hidden="true"
+      widths={widths}
+      sizes={sizes}
+      loading="lazy"
+      class:list={[
+        heightClass,
+        'absolute inset-0 w-full object-cover opacity-0 transition-opacity duration-500 group-hover/img:opacity-100',
+      ]}
+    />
+  )}
+
+  {hoverVideo && (
+    <video
+      data-hover-video
+      muted
+      loop
+      playsinline
+      preload="metadata"
+      poster={hoverVideo.poster}
+      class:list={[
+        heightClass,
+        'absolute inset-0 w-full object-cover opacity-0 transition-opacity duration-500 group-hover/img:opacity-100',
+      ]}
+    >
+      {hoverVideo.webm && <source src={hoverVideo.webm} type="video/webm" />}
+      <source src={hoverVideo.mp4} type="video/mp4" />
+    </video>
+  )}
+</div>

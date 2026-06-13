@@ -1,0 +1,76 @@
+---
+title: AV Simulation
+category: Neural Evolution / AI
+type: research
+year: '2024'
+role: AI Engineer
+summary: Evolving autonomous-driving controllers with NEAT — peak fitness 84/98/100 across three tracks. Published at ICORIS 2024.
+thumbnail: ../../images/av-sim-poster.jpeg
+# Media — grid-hover preview + case-study carousel. Both accept images (bare path
+# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
+# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
+hoverThumbnail: { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
+gallery:
+  - { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
+  - ../../images/autove.jpeg
+techStack: [Python, NEAT, Pyglet, Genetic Algorithms, Neural Networks]
+metrics:
+  - { value: 'Published', label: 'ICORIS 2024' }
+  - { value: '84 / 98 / 100', label: 'Peak fitness, Tracks A/B/C' }
+  - { value: 'Pop 60 · 0.8 mut', label: 'Best NEAT config' }
+featured: true
+order: 5
+paper: https://doi.org/10.1109/ICORIS63540.2024.10903833
+# Extra labeled links shown under "Resources" — e.g. demo, slides, repo.
+links:
+  - { label: 'Demo video', url: 'https://www.youtube.com/watch?v=CB4Qjc4w1Dk' }
+---
+
+## Overview
+
+An autonomous-vehicle training simulation built on **NEAT** (NeuroEvolution of Augmenting
+Topologies), a genetic algorithm that evolves both a neural network's topology and its
+weights. Cars learn to drive 2D race tracks in a Pyglet simulation, and the work was
+published at **ICORIS 2024**.
+
+## The problem
+
+Hand-designing a neural controller for driving — both its architecture and its weights — is
+hard and brittle. Evolutionary methods sidestep this by letting the network *structure* and
+its weights emerge together from selection pressure over generations. NEAT is well-suited
+because it grows the simplest effective topology incrementally and preserves diverse
+solutions via speciation, rather than fixing the architecture up front.
+
+## Approach
+
+Each car is a 2D object equipped with **distance sensors** (rays cast around the vehicle).
+Those readings feed a neural network whose four outputs are **accelerate, brake, turn left,
+and turn right**. NEAT evolves a population of these networks across generations: the
+**fitness function counts the checkpoints (track gates) a car passes**, and a **30-second
+timer** caps each generation so a single run can't stall the simulation. The best car of each
+generation becomes the parent for the next, with crossover and mutation driving exploration.
+
+I tested on three tracks of increasing difficulty — **Track A (33 checkpoints, easy), Track B
+(37, medium), and Track C (46, hard)** — and ran a hyperparameter study over population size
+and mutation rate to see how each configuration converges. Against the default (population 40,
+mutation 0.6), I compared three tunings: **Tuning 1** (20 / 0.5), **Tuning 2** (60 / 0.8), and
+**Tuning 3** (80 / 0.4).
+
+## Results
+
+**Tuning 2 (population 60, mutation rate 0.8) was the strongest overall**, rising fastest in
+early generations and reaching peak fitness scores of **84, 98, and 100 on Tracks A, B, and
+C** respectively. Across configurations the best scores landed around the **50th generation**
+and didn't improve meaningfully past the 100th. The smaller population (Tuning 1) did
+relatively well only on the easy track, while the large-population/low-mutation setup
+(Tuning 3) progressed slowly early but caught up on the hardest track. The work was published
+at the 2024 6th International Conference on Cybernetics and Intelligent System (ICORIS).
+
+## What I learned
+
+The headline finding is that **NEAT is genuinely sensitive to its hyperparameters** — because
+it searches over topology *and* weights through random mutation, the right population/mutation
+balance matters more than it would for a fixed-length-chromosome GA, and the best setting
+shifts with track difficulty. That sensitivity is the main limitation to flag for future
+work, and it's the throughline into the gradient-based RL I did later: NEAT discovers
+controller *structure* well, but careful tuning is the price of that flexibility.

@@ -1,0 +1,72 @@
+---
+title: AWS Agent
+category: Agentic LLM / Cloud
+year: '2024'
+role: Cloud Architect
+summary: 'Agentic LLM on serverless: Lambda + SageMaker + S3.'
+thumbnail: ../../images/awsllm.png
+# Media — grid-hover preview + case-study carousel. Both accept images (bare path
+# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
+# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
+# hoverThumbnail: ../../images/awsllm.png
+# gallery:
+#   - ../../images/awsllm.png
+#   - { src: videos/aws-agent-demo.mp4 }
+techStack: [Python, AWS Lambda, Amazon SageMaker, S3, LLM, Cloud Computing]
+metrics:
+  - { value: 'Serverless', label: 'Scales to zero' }
+  - { value: 'Tool use', label: 'S3-backed retrieval' }
+featured: false
+hidden: true
+order: 2
+github: https://github.com/kfhanson/AWS-LLM-Connector
+# Extra labeled links shown under "Links" — e.g. live demo, write-up.
+# links:
+#   - { label: 'Demo video', url: 'https://...' }
+---
+
+## Overview
+
+A serverless AI assistant architected on AWS Lambda that queries a Large Language
+Model hosted on Amazon SageMaker, and fetches real-time structured data from S3 —
+a working demonstration of agentic tool use on a fully serverless stack.
+
+## The problem
+
+LLM agents are usually deployed behind always-on servers, which is expensive when
+traffic is bursty or intermittent. The question I wanted to answer: can a useful
+tool-using agent run with no persistent infrastructure at all?
+
+## Approach
+
+The agent answers general queries directly and, when a query needs live data, calls
+out to an S3 bucket as a tool — fetching structured records and grounding its response
+in them. Lambda orchestrates the request/response flow; SageMaker hosts the model.
+
+{/* TODO: describe how tool-routing is decided — does the LLM emit a structured call,
+or is there a classifier/router in front? A short request-flow walkthrough would make
+the "agentic" claim concrete. */}
+
+## Architecture
+
+```
+client → API Gateway → Lambda (orchestrator)
+                          ├── SageMaker endpoint (LLM inference)
+                          └── S3 (structured data / tool)
+```
+
+The whole stack scales to zero when idle, eliminating server-management overhead and
+cost during downtime.
+
+## Results
+
+The project shows that LLM-based agents can be deployed without persistent
+infrastructure, scaling to zero when idle.
+
+{/* TODO (optional): cold-start latency, cost-per-1k-queries, or anything you measured.
+Even rough numbers help. */}
+
+## What I learned
+
+{/* TODO: e.g. the trade-offs of serverless LLM serving — cold starts, SageMaker cost,
+where this pattern fits and where it doesn't. */}

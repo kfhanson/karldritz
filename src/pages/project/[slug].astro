@@ -1,31 +1,63 @@
 ---
 import { Image, getImage } from 'astro:assets';
+import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
-import { projects, visibleProjects } from '../../data/projects';
 import { url } from '../../scripts/url';
 
-export function getStaticPaths() {
-  return projects.map((project) => ({
-    params: { slug: project.slug },
-    props: { project },
-  }));
+export async function getStaticPaths() {
+  const projects = (await getCollection('projects')).sort(
+    (a, b) => a.data.order - b.data.order
+  );
+  const visible = projects.filter((p) => !p.data.hidden);
+
+  return projects.map((entry) => {
+    const projectIndex = projects.findIndex((p) => p.id === entry.id);
+    // "Next project" cycles through visible projects only.
+    const vi = visible.findIndex((p) => p.id === entry.id);
+    const nextProject =
+      vi === -1 ? visible[0] : visible[(vi + 1) % visible.length];
+    return {
+      params: { slug: entry.id },
+      props: { entry, displayNumber: projectIndex + 1, nextProject },
+    };
+  });
 }
 
-const { project } = Astro.props;
+const { entry, displayNumber, nextProject } = Astro.props;
+const { data } = entry;
+const { Content } = await render(entry);
 
-const projectIndex = projects.findIndex(p => p.slug === project.slug);
+const ogImage = (await getImage({ src: data.thumbnail, width: 1200 })).src;
 
-// Cycle "Next project" through visible projects only
-const visibleIndex = visibleProjects.findIndex(p => p.slug === project.slug);
-const nextProject =
-  visibleProjects[(Math.max(visibleIndex, 0) + 1) % visibleProjects.length] ?? visibleProjects[0];
+// Unified link list: the convenience fields first, then any custom links.
+const projectLinks = [
+  data.link && { label: 'Live site', url: data.link },
+  data.paper && { label: 'Paper', url: data.paper },
+  data.github && { label: 'GitHub', url: data.github },
+  ...data.links,
+].filter(Boolean) as { label: string; url: string }[];
 
-const ogImage = (await getImage({ src: project.image, width: 1200 })).src;
+const linksHeading =
+  data.type === 'competition' ? 'Sources' : data.type === 'research' ? 'Resources' : 'Links';
+
+// Carousel media — the gallery (mixed images + videos), or the main image alone.
+const carousel = data.gallery.length ? data.gallery : [data.thumbnail];
+const slidesData = await Promise.all(
+  carousel.map(async (m) => {
+    if ('width' in m) return { kind: 'image' as const, image: m };
+    return {
+      kind: 'video' as const,
+      mp4: url(`/${m.src}`),
+      webm: m.webm ? url(`/${m.webm}`) : undefined,
+      poster: m.poster ? (await getImage({ src: m.poster, width: 1280 })).src : undefined,
+    };
+  })
+);
 ---
 
 <Base
-  title={`${project.title} — Karldritz Farrel Hanson`}
-  description={project.description ?? `${project.title} — a project by Karldritz Farrel Hanson.`}
+  title={`${data.title} — Karldritz Farrel Hanson`}
+  description={data.summary}
   ogImage={ogImage}
 >
   <main id="main-content" class="min-h-screen bg-canvas text-ink pt-32 pb-24 px-6 md:px-10 lg:px-16">
@@ -34,92 +66,136 @@ const ogImage = (await getImage({ src: project.image, width: 1200 })).src;
       <!-- Back -->
       <a
         href={url('/')}
-        class="inline-flex items-center gap-2 font-sans text-sm text-ink-muted hover:text-ink transition-colors duration-200 mb-16"
+        class="inline-flex items-center gap-2 font-sans text-sm text-ink-muted hover:text-ink transition-colors duration-200 mb-10"
       >
         ← Back
       </a>
 
       <!-- Header -->
-      <header class="mb-20">
+      <header class="mb-8">
         <p class="fade-up font-mono text-xs text-ink-muted mb-4">
-          {String(projectIndex + 1).padStart(2, '0')} — {project.category}
+          {String(displayNumber).padStart(2, '0')} — {data.category}
+          {data.type !== 'project' && (
+            <span class="text-pine"> · {data.type === 'competition' ? 'Competition' : 'Research'}</span>
+          )}
         </p>
-        <h1 class="fade-up fade-up-1 font-display text-6xl md:text-8xl lg:text-9xl text-ink leading-[0.9] mb-12">
-          {project.title}
+        <h1 class="fade-up fade-up-1 font-display text-5xl md:text-7xl text-ink leading-[0.95]">
+          {data.title}
         </h1>
-
-        <div class="fade-up fade-up-2 grid grid-cols-2 md:grid-cols-4 gap-8 border-t border-wire pt-8">
-          <div>
-            <h5 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Role</h5>
-            <p class="font-sans text-sm text-ink">{project.role ?? 'Developer'}</p>
-          </div>
-          <div>
-            <h5 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Year</h5>
-            <p class="font-sans text-sm text-ink">{project.year}</p>
-          </div>
-          <div>
-            <h5 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Stack</h5>
-            <p class="font-sans text-sm text-ink leading-relaxed">
-              {project.techStack?.join(', ')}
-            </p>
-          </div>
-          <div class="flex items-start justify-start md:justify-end gap-3 flex-wrap">
-            {project.link && (
-              <a
-                href={project.link}
-                target="_blank"
-                rel="noreferrer"
-                class="font-sans text-xs text-ink border border-wire rounded-full px-4 py-2 hover:bg-ink hover:text-canvas hover:border-ink transition-colors duration-200"
-              >
-                Live site
-              </a>
-            )}
-            {project.github && (
-              <a
-                href={project.github}
-                target="_blank"
-                rel="noreferrer"
-                class="font-sans text-xs text-ink border border-wire rounded-full px-4 py-2 hover:bg-ink hover:text-canvas hover:border-ink transition-colors duration-200"
-              >
-                GitHub
-              </a>
-            )}
-          </div>
-        </div>
       </header>
 
-      <!-- Hero image -->
-      <div class="w-full h-[50vh] md:h-[70vh] bg-panel overflow-hidden rounded-sm mb-20">
-        <Image
-          src={project.image}
-          alt={project.title}
-          widths={[1280, 1800]}
-          sizes="100vw"
-          loading="eager"
-          class="w-full h-full object-cover"
-        />
+      <!-- Coverflow carousel — center card large, neighbours collapse to slats -->
+      <div class="coverflow-wrap mb-12 relative">
+        <div id="coverflow" data-count={slidesData.length} class="coverflow w-full">
+          <div class="coverflow-track" data-track>
+            {slidesData.map((m, i) => (
+              <div class="coverflow-card bg-panel" data-slide={i}>
+                {m.kind === 'video' ? (
+                  <video data-cf-video muted loop playsinline preload="metadata" poster={m.poster}>
+                    {m.webm && <source src={m.webm} type="video/webm" />}
+                    <source src={m.mp4} type="video/mp4" />
+                  </video>
+                ) : (
+                  <Image
+                    src={m.image}
+                    alt={`${data.title} — image ${i + 1}`}
+                    widths={[700, 1400]}
+                    sizes="(min-width: 768px) 60vw, 80vw"
+                    loading={i === 0 ? 'eager' : 'lazy'}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+
+          {slidesData.length > 1 && (
+            <>
+              <button
+                id="cf-prev"
+                type="button"
+                aria-label="Previous image"
+                class="cf-btn absolute top-1/2 -translate-y-1/2 left-3 md:left-5 z-10"
+              >‹</button>
+              <button
+                id="cf-next"
+                type="button"
+                aria-label="Next image"
+                class="cf-btn absolute top-1/2 -translate-y-1/2 right-3 md:right-5 z-10"
+              >›</button>
+            </>
+          )}
+        </div>
       </div>
 
-      <!-- Body copy -->
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-12 mb-24">
-        <div class="md:col-span-7 md:col-start-3">
-          <h3 class="font-display text-xl text-ink mb-8">About the project</h3>
-          <div class="space-y-6 font-sans text-base text-ink-muted leading-relaxed">
-            {project.fullDescription
-              ? project.fullDescription.map((paragraph) => <p>{paragraph}</p>)
-              : <p>{project.description}</p>}
+      <!-- Sticky sidebar + case-study body -->
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-x-12 gap-y-10 mb-24">
+
+        <aside class="md:col-span-4 lg:col-span-3">
+          <div class="md:sticky md:top-28 space-y-8">
+
+            <!-- Meta -->
+            <dl class="grid grid-cols-2 gap-x-8 gap-y-6 md:grid-cols-1">
+              <div>
+                <dt class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Role</dt>
+                <dd class="font-sans text-sm text-ink">{data.role}</dd>
+              </div>
+              <div>
+                <dt class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Year</dt>
+                <dd class="font-sans text-sm text-ink">{data.year}</dd>
+              </div>
+              <div class="col-span-2 md:col-span-1">
+                <dt class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-2">Stack</dt>
+                <dd class="font-sans text-sm text-ink leading-relaxed">{data.techStack.join(', ')}</dd>
+              </div>
+            </dl>
+
+            <!-- Metrics -->
+            {data.metrics.length > 0 && (
+              <div class="border-t border-wire pt-6 space-y-4">
+                {data.metrics.map((m) => (
+                  <div>
+                    <p class="font-display text-lg text-ink leading-tight">{m.value}</p>
+                    <p class="font-mono text-[10px] text-ink-muted uppercase tracking-widest">{m.label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <!-- Links / sources -->
+            {projectLinks.length > 0 && (
+              <div class="border-t border-wire pt-6">
+                <h2 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-3">{linksHeading}</h2>
+                <div class="flex flex-wrap gap-2">
+                  {projectLinks.map((l) => (
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="inline-flex items-center gap-1.5 font-sans text-xs text-ink border border-wire rounded-full px-3 py-1.5 hover:bg-ink hover:text-canvas hover:border-ink transition-colors duration-200"
+                    >
+                      {l.label} <span aria-hidden="true">↗</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
-        </div>
+        </aside>
+
+        <article class="md:col-span-8 lg:col-span-8 lg:col-start-4 case-study">
+          <Content />
+        </article>
       </div>
 
       <!-- Next project -->
       <div class="border-t border-wire pt-12 flex items-center justify-between">
         <span class="font-mono text-xs text-ink-muted uppercase tracking-widest">Next project</span>
         <a
-          href={url(`/project/${nextProject.slug}/`)}
+          href={url(`/project/${nextProject.id}/`)}
           class="font-display text-2xl md:text-4xl text-ink hover:text-pine transition-colors duration-200"
         >
-          {nextProject.title} <span aria-hidden="true">→</span>
+          {nextProject.data.title} <span aria-hidden="true">→</span>
         </a>
       </div>
 

@@ -1,0 +1,111 @@
+---
+title: CuanCerdas
+category: Agentic LLM / FinTech
+type: competition
+year: '2026'
+role: Team Lead
+summary: AI finance copilot for Indonesian MSMEs — auto-generated reports + a grounded advisor chatbot. Paylabs × Alibaba Cloud Hackathon, 2nd place.
+thumbnail: ../../images/cuancerdas.jpeg
+# Media — grid-hover preview + case-study carousel. Both accept images (bare path
+# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
+# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
+# hoverThumbnail: ../../images/cuancerdas.jpeg
+# gallery:
+#   - ../../images/cuancerdas.jpeg
+#   - { src: videos/cuancerdas-demo.mp4 }
+techStack: [TypeScript, Fastify, Prisma, PostgreSQL, Qwen, MCP, WebSocket, Alibaba Cloud]
+metrics:
+  - { value: '2nd place', label: 'Paylabs × Alibaba 2026' }
+  - { value: 'Report + advisor', label: 'Two grounded AI agents' }
+  - { value: 'MCP tool layer', label: 'Numbers stay deterministic' }
+featured: true
+order: 3
+links:
+  - { label: 'Winners announcement', url: 'https://www.instagram.com/p/DVgBOhalKwH/' }
+  - { label: 'News', url: 'https://edukasi.kompas.com/read/2026/03/17/183245671/gelar-mini-hackathon-2026-paylabs-gandeng-alibaba-cloud-indonesia-dan-binus' }
+#   - { label: 'GitHub', url: 'https://...' }
+---
+
+## The brief
+
+CuanCerdas was built for the **Paylabs × Alibaba Cloud Mini Hackathon 2026** — a
+build-and-pitch competition judged on a live demo, run on Alibaba Cloud infrastructure
+with Paylabs (a payment gateway) as the data partner. I led a four-person team — Team Jo —
+through the build, and we placed **2nd**.
+
+## The idea
+
+We bet on **financial literacy for Indonesian MSMEs (UMKM)**. The gap is real and large:
+**87% of UMKM** don't do basic financial management — budgeting, recording, reporting,
+controlling — and **over half** of owners finished only primary school, which caps
+financial literacy and strategic planning. Yet UMKM are **60.5% of Indonesia's GDP** and
+**96.9% of national employment**, and 2 in 5 have never touched AI. They sit on a goldmine
+of transaction data (everything they run through Paylabs) but have neither the time nor the
+training to read it, and generic chatbots don't help because the advice isn't grounded in
+the business's actual numbers.
+
+So we built a **finance copilot**: an AI agent that turns a merchant's Paylabs transactions
+into a clean, structured financial report — and a chatbot, **JO**, that explains that report
+in plain language and advises on it. The framing we pitched on: *"we don't just tell UMKM how
+much money they make — we teach them how to manage and grow it through AI."*
+
+## My role
+
+I led the team as **Team Lead** and worked **full-stack** across the build — the agent
+design and the MCP grounding layer, the Fastify backend and report pipeline, and the live
+pitch.
+
+{/* TODO (optional): split out what you owned vs. delegated to Aura / Jenson / Kelila —
+the clearer the ownership line, the stronger the signal for a recruiter. */}
+
+## Building it
+
+The system is two AI behaviours over one shared, grounded data layer:
+
+- **Report-generation agent** — turns a date range of transactions into a structured
+  report: revenue, COGS, OPEX, gross/net profit, net margin, ending cash, category and
+  channel breakdowns, and a previous-period comparison. Generation is asynchronous and
+  callback-based: the frontend kicks off a job, the agent does its analysis, writes results
+  to a staging row, and the backend persists the finished report into normalized tables and
+  renders the dashboard summary, charts, insights, and a PDF export.
+- **Advisor chatbot (JO)** — a streaming financial advisor. The browser holds a WebSocket to
+  the backend, which relays a token stream from the agent (NDJSON over HTTP). JO is
+  merchant-scoped and report-anchored: it lists the merchant's reports, pulls only the
+  relevant one, loads recent chat context and a transaction summary, and answers from there.
+  Users can pick the advisor model per chat from a live allowlist.
+
+The piece I'm proudest of is the **grounding layer**. The agent never runs free-form SQL —
+it talks to the database through an **MCP server** that exposes a fixed catalogue of typed
+tools (`get_report_metrics`, `list_available_reports`, `get_advisor_report`, …), so every
+number JO cites is computed deterministically, not hallucinated. `merchantId` is the hard
+data-isolation boundary, so a merchant can only ever see its own books. That discipline shows
+up in JO's behaviour: when a user asked it to "set a 1–5% inventory-efficiency target for the
+next two weeks," JO pushed back — the transaction schema is category-level, there's no
+SKU/turnover data to support a target like that — and explained *why*, instead of inventing a
+confident-sounding number.
+
+The stack: a **Fastify + TypeScript** backend (Prisma, Zod, PDFKit, WebSocket relay, JWT
+auth), a **FastAPI** agent service, the **MCP** tool server, and **PostgreSQL** — all running
+on **Alibaba Cloud** (ECS for compute, OSS for storage), with the agent powered by **Qwen**.
+
+{/* TODO (optional): name the one obstacle you hit under the clock — what you had to cut or
+fake to ship, and how the callback/streaming split came together late. */}
+
+## Pitch day
+
+We pitched the business case as hard as the demo: a **freemium** model where basic reporting
+and general literacy education are free for every Paylabs merchant, with the deep AI mentor
+and predictive analysis behind a monthly subscription — turning Paylabs from a payment
+*utility* into an *ecosystem* for UMKM.
+
+{/* TODO: the room itself — who you pitched to, how the live demo of JO landed, a judge
+question you remember. This is the part that makes the 2nd-place result land. */}
+
+## Outcome & takeaways
+
+We finished **2nd place** with a working technical MVP — not just a concept deck: real async
+report generation, real streaming advisor responses, structured DB-backed persistence, and
+merchant-scoped, deterministic data access through the MCP tool layer.
+
+{/* TODO: honest reflection — what you'd change about the report/advisor split or the
+grounding design, and what leading a team under hackathon pressure taught you. */}
