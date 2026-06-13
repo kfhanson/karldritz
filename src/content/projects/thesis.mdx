@@ -1,0 +1,186 @@
+---
+title: Pareto-Based Evolutionary Reward Shaping for Deep Reinforcement Learning Traffic Control
+category: Genetic Algorithm, Multi-Objective Reinforcement Learning
+type: research
+year: '2026'
+role: First Author, Lead ML Engineer
+summary: Evolving the reward function (NSGA-II) for an LSTM-DQN traffic controller to balance throughput, fairness, and smoothness.
+thumbnail: ../../images/flowai-sec.jpeg
+# Media — grid-hover preview + case-study carousel. Both accept images (bare path
+# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
+# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
+# hoverThumbnail: ../../images/thesis.jpeg
+# gallery:
+#   - ../../images/thesis.jpeg
+#   - { src: videos/thesis-demo.mp4 }
+techStack: [Python, SUMO, NSGA-II, LSTM-DQN, Multi-Objective RL]
+metrics:
+  - { value: '1,059 vehicles', label: 'Throughput, balanced policy' }
+  - { value: '−35% queue variance', label: 'vs best baseline' }
+  - { value: '−28% total stops', label: 'vs best baseline' }
+featured: false
+hidden: true
+order: 1
+github: https://github.com/kfhanson/Evolutionary-Reward-Shaping-Traffic-Control
+# Extra labeled links shown under "Resources" — e.g. paper, slides, demo.
+# links:
+#   - { label: 'Paper', url: 'https://...' }
+#   - { label: 'Demo video', url: 'https://...' }
+---
+
+# Teaching a Traffic Light to Stop Being Greedy
+
+*How I used an evolutionary algorithm to evolve the reward function for a reinforcement learning traffic controller, and why "maximize throughput" turned out to be terrible advice.*
+
+## Overview
+
+Most smart traffic light projects you read about have one goal: push as many cars through the intersection as possible. It sounds reasonable. More cars through equals less congestion, right?
+
+Turns out, not really. When you tell an AI agent to only care about throughput, it learns to play favorites. It holds the green light for the busy road and lets the quieter lanes rot. Drivers wait forever, engines idle, and the whole thing gets less fair without even getting that much faster.
+
+So I built something different. I combined a genetic algorithm called NSGA-II with a reinforcement learning agent (an LSTM-DQN) to balance three competing goals at once: throughput, fairness, and smoothness. Instead of me sitting there guessing how much each goal should matter, the genetic algorithm *evolves* those priorities on its own.
+
+The result is not a single "best" policy. It is a whole menu of good policies, each one a different trade-off, so a traffic manager can pick whatever fits the moment. The headline number: the balanced policy moved the most cars (1,059), while cutting queue variance by 35% and total stops by 28% compared to the best baseline. And the most interesting finding had nothing to do with the headline at all, but more on that later.
+
+## The problem
+
+Cities run on cars, and cars get stuck. That stuck time is not just annoying, it costs real money in lost productivity and dumps emissions into the air from engines that sit there idling.
+
+The old solutions are simple but rigid. Fixed-time control, which Webster described back in 1958, just runs a pre-set timer based on historical traffic. It works great when traffic is predictable and falls apart the moment something unexpected happens. Adaptive systems like SCOOT and SCATS are smarter, they react to live sensor data, but they still lean on calibrated models and predefined parameters. When real traffic stops matching the model's assumptions, performance drops.
+
+Deep Reinforcement Learning (DRL) came along as a much better fit because it learns directly from the environment and adapts in real time. But it inherited one stubborn habit from the older systems: the single objective.
+
+Here is the core issue. Real traffic is not one problem, it is three problems pulling against each other:
+
+- **Throughput.** Let the busiest lanes pass first so you move as many vehicles as possible.
+- **Fairness.** Make sure no single driver waits forever just because they picked the quiet lane.
+- **Smoothness.** Avoid the constant stop-start-stop wave that causes accidents and burns fuel.
+
+These goals fight. Maximizing one tends to wreck the others. The usual fix is to smush them into a single reward like `0.7 * throughput + 0.2 * fairness + 0.1 * smoothness`, but then you are stuck hand-tuning those weights, and you only ever get the one strategy those weights point to. Everything else stays unexplored.
+
+That is the gap. We need a controller that can learn the trade-offs properly and give us options, not one fixed answer that someone guessed at.
+
+## Approach
+
+The idea is to split the work across two levels, and let each level do what it is good at.
+
+**The lower level learns how to drive the intersection.** This is the reinforcement learning agent. It watches the traffic, picks which light to turn green, and tries to collect as much reward as possible.
+
+**The upper level learns what "good" even means.** This is NSGA-II, the genetic algorithm. Instead of me deciding how much throughput matters versus fairness, NSGA-II evolves a population of *reward weight vectors* and figures out which combinations actually produce strong, balanced behavior.
+
+So the reward function is not fixed. It is shaped by evolution. That is the whole "evolutionary reward shaping" idea in the title.
+
+Why NSGA-II specifically? It is built for multi-objective problems where there is no single winner. It uses non-dominated sorting to find a set of Pareto-optimal solutions (the trade-offs), it keeps the best solutions through elitism, and it maintains diversity without me having to tune extra parameters. An earlier study (Leal, 2023) used NSGA-II for traffic too, but only to optimize static signal timings, which gives you a rigid plan that breaks during surges. My version evolves the *strategy*, not the timing, and pairs it with an agent that adapts in real time.
+
+The two levels run in a nested loop:
+
+1. NSGA-II produces a population of reward weight vectors.
+2. For each weight vector, an LSTM-DQN agent is trained to maximize that specific weighted reward.
+3. The trained agent runs in the SUMO simulator, and its performance gets measured as a fitness vector (throughput, fairness, smoothness).
+4. NSGA-II uses those fitness scores to evolve a better population, and the loop repeats.
+
+The end product is strategically smart thanks to NSGA-II and tactically quick thanks to the DQN-LSTM.
+
+## Architecture
+
+Here is how the pieces actually fit together.
+
+### The simulation
+
+Everything runs in SUMO (Simulation of Urban MObility), an open-source traffic simulator, with the TraCI library handling control and monitoring. To keep it realistic, I modeled a real intersection: the BSD Raya Utama Street and BSD Grand Boulevard intersection in BSD City, Indonesia, which is genuinely one of the busiest spots around. Vehicles arrive from four directions (North, South, East, West) and the demand changes over time, so queues build up naturally depending on how the lights are managed.
+
+I tracked three metrics, which map directly onto the three goals:
+
+- **Throughput** = how many vehicles get through. Higher is better.
+- **Queue Variance** = how evenly traffic is spread across lanes (this is the fairness measure). Lower is better.
+- **Total Stops** = how many times vehicles had to stop (the smoothness measure). Lower is better.
+
+### The lower level: the LSTM-DQN agent
+
+The agent is a Deep Q-Network with LSTM layers bolted on. The LSTM matters because traffic is a Partially Observable Markov Decision Process. The agent never sees the *full* picture at any single moment, so the LSTM lets it remember recent history and pick up on patterns over time.
+
+- **State.** A simple tuple of halting vehicle counts on each approach: `S = [v_n, v_s, v_e, v_w]`. Just the raw number of stopped cars in each direction, fed into the LSTM.
+- **Actions.** Four discrete choices, one per approach. The agent picks which direction gets the green phase next.
+- **Reward.** This is the clever part. Instead of a fixed reward, the agent uses a parameterized one:
+
+  ```
+  R_t(w) = w1 * r1 + w2 * r2 + w3 * r3
+  ```
+
+  where `r1` is throughput (cars cleared), `r2` is fairness (the negative standard deviation of queue lengths, so it penalizes uneven queues), and `r3` is smoothness (the negative count of stops). The weights `w` come straight from the genetic algorithm.
+
+### The upper level: NSGA-II
+
+Each individual in the NSGA-II population is a normalized weight vector `G = [w1, w2, w3]` that sums to 1. So one individual might say "60% throughput, 30% fairness, 10% smoothness." To score an individual, I run a full simulation with an agent trained on those weights and read back the metrics.
+
+The evolutionary operators are standard NSGA-II:
+
+- **Selection** by binary tournament, based on Pareto rank and crowding distance.
+- **Simulated Binary Crossover (SBX)** to mix weight preferences between parents.
+- **Polynomial Mutation** to nudge weights a little and keep exploring.
+
+### Training details
+
+A few things I had to get right for it to train at all:
+
+- I seeded the replay buffer using a rule-based actuated controller first, so the agent started with realistic experience instead of pure chaos.
+- I had to scale the reward components. Throughput got scaled up, while the variance and stop penalties got scaled down. Otherwise the massive negative penalty from a traffic jam would dominate every gradient update and the network would learn nothing useful.
+- Final hyperparameters after a grid search: batch size 256, learning rate 5e-4, discount factor 0.95 (to prioritize clearing queues now rather than later), and gradient clipping at max norm 1.0 for stability.
+- NSGA-II ran with a population of 30 over 20 generations, SBX at 90% crossover probability, and a 1/n mutation rate (about 33% per weight, since there are three).
+- Each policy was evaluated over 1,000 simulation steps, with a max green of 60 seconds, min green of 10 seconds, and a 6-second yellow. The max green cap is important, it stops a greedy single-objective agent from holding one light forever and causing total gridlock.
+
+## Results
+
+I compared the evolved policy against four baselines: fixed-time control, rule-based actuated control, a single-objective RL agent tuned for max throughput, and a single-objective RL agent tuned for max fairness.
+
+| Method | Throughput | Queue Variance | Total Stops |
+|---|---|---|---|
+| Default (Fixed-Time) | 1011 | 67 | 35,913 |
+| Rule-Based Actuated | 1015 | 20 | 20,429 |
+| RL (Max Throughput) | 1032 | 21 | 20,977 |
+| RL (Max Fairness) | 625 | 393 | 78,822 |
+| **Proposed NSGA-II Balanced** | **1059** | **13** | **14,676** |
+
+The balanced policy won on all three metrics at once. Highest throughput, lowest variance, fewest stops. That is the part I was hoping for.
+
+But the baselines tell a more interesting story than the winner does.
+
+Look at the **Max Throughput** agent. It was built to do one thing, and it did push more cars than the rule-based system (1,032 vs 1,015). But its fairness barely moved (variance 21 vs 20) and its stops actually got *worse* (20,977 vs 20,429). So optimizing purely for throughput basically just matched a simple reactive sensor while getting slightly rougher. It hit a ceiling.
+
+Then look at **Max Fairness**, which is almost funny in how badly it failed. By aggressively switching phases to keep every queue equal, it caused constant gridlock. Throughput collapsed to 625 and variance shot up to 393. The single goal it was chasing was the goal it ruined.
+
+That contrast is the whole argument for going multi-objective.
+
+### The Pareto front (and the surprise)
+
+NSGA-II did not just give me one policy, it gave me a Pareto front, a spread of non-dominated policies each with a different balance.
+
+The greedy throughput-focused policies (where w1 was 0.60 or higher) processed lots of cars but paid for it with high queue variance (above 12.5) and the most stops (over 15,200). Classic greedy behavior: hold the green for the big road, ignore everyone else.
+
+Here is the part that genuinely surprised me. The single highest throughput policy (around 1,059 cars) was **not** one of the throughput-focused ones. It came from a policy that prioritized *smoothness* (w1 was only about 0.38). By minimizing the stop-and-go waves, the agent fell into a steady-state flow that moved more vehicles than the agents that were explicitly trying to move the most vehicles.
+
+In other words, chasing throughput directly was not the best way to get throughput. Smoothing the flow was. That trade-off had a cost though: that same smooth policy had the highest queue variance, because minor roads got held back to protect the main flow.
+
+The sweet spot was the balanced cluster (w1 around 0.50 to 0.55), which handled roughly 1,050 vehicles while keeping variance as low as 11.0 and stops down around 14,400.
+
+The practical payoff: a traffic manager now has a real menu. Run a high-throughput policy during rush hour, switch to a smooth, balanced one during off-peak to cut driver frustration and emissions. And training took about 2 hours on a high-end laptop, with cheap inference afterward, so it is actually deployable.
+
+## What I learned
+
+A few things stuck with me after this project.
+
+**Optimizing for a goal directly is often the worst way to reach it.** This was the big one. The policy that moved the most cars was the one that cared least about moving cars and most about smooth flow. It is a good reminder that the obvious objective function is not always the right one, and that emergent behavior can beat brute force.
+
+**Single-objective thinking has a ceiling, and sometimes a cliff.** The max-throughput agent plateaued and the max-fairness agent drove off a cliff into gridlock. Once I saw the fairness baseline collapse so badly, the case for multi-objective optimization basically made itself.
+
+**Reward scaling is not a detail, it is the whole game.** Before I scaled the components, the huge negative penalties from jams swamped every gradient and the agent learned garbage. Getting throughput scaled up and penalties scaled down was the difference between a model that trained and one that did not.
+
+**Giving people options beats giving them an answer.** The Pareto front turned out to be more valuable than any single policy on it. Real operators have different needs at different times, and handing them a set of solid trade-offs respects that better than forcing one "optimal" choice.
+
+**Cheap to run, expensive to train.** Two hours of training is real, but once it is done the policies run for almost nothing. That asymmetry is what makes this kind of thing practical instead of just academic.
+
+For future work, the obvious next step is scaling up from one intersection to a whole network with multiple coordinating agents (multi-agent RL). That brings a coordination problem and a much bigger compute bill, which is its own challenge worth digging into.
+
+---
+
+Because of the stochastic parts of SUMO and neural network training, exact numbers will not reproduce perfectly, but the pattern and the improvements over baselines hold up across runs.

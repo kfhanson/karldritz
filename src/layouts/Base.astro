@@ -44,15 +44,11 @@ const ogImageUrl = ogImage && Astro.site ? new URL(ogImage, Astro.site).href : u
     />
 
     <link rel="icon" href={url('/favicon.ico')} type="image/x-icon" />
-    <script is:inline>
-      document.documentElement.classList.remove('no-js');
-      // Compress the hero entrance if it already played this session
-      try {
-        if (sessionStorage.getItem('introPlayed')) {
-          document.documentElement.classList.add('intro-played');
-        }
-      } catch {}
-    </script>
+    <!-- data-astro-rerun: the ClientRouter swap restores the static html
+         attributes (re-adding no-js) but skips already-executed inline scripts,
+         so this must re-run on every navigation or the no-js CSS fallback
+         kicks in and breaks the carousel until a hard refresh. -->
+    <script is:inline data-astro-rerun>document.documentElement.classList.remove('no-js');</script>
     <ClientRouter />
   </head>
   <body class="relative w-full min-h-screen bg-canvas text-ink">
