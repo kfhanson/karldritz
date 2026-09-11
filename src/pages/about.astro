@@ -1,37 +1,25 @@
 ---
 import Base from '../layouts/Base.astro';
 
-const experience = [
-  {
-    company: 'Sertis Teknologi Indonesia',
-    period: 'Apr 2026 – Present',
-    role: 'AI Engineer Intern',
-    description: 'Conducted extensive learning of enterprise LLMs and knowledge management from industry experts.',
-  },
-  {
-    company: 'TemuCita',
-    period: 'Jan 2026 – Present',
-    role: 'Full Stack Engineer, Volunteer',
-    description: 'Website revamp focusing on development of AI chatbot pages with integrated memory, adding RAG and context management, focusing on personalized experience for users.',
-  },
-  {
-    company: 'Huawei Cloud Indonesia',
-    period: 'Sep 2025 – Mar 2026',
-    role: 'Solution Architect Intern',
-    description: "Analyzed customer requirements to properly understand customers' needs and designed solution architectures to be efficient and cost-effective. Participated in customer migration project to Huawei Cloud for a major telecommunications company.",
-  },
-  {
-    company: 'Digdaya Duta Digital',
-    period: 'Aug 2022 – Jan 2023',
-    role: 'Research Intern',
-    description: 'Analyzed the codebase of the e-learning platform and participated in development and assessment. Formed a report regarding the use of AI and ML as a potential for business development.',
-  },
-  {
-    company: 'Cyberindo Aditama',
-    period: 'May 2021 – May 2022',
-    role: 'Research Intern',
-    description: 'Conducted research on the behavior of students during online learning through surveys and investigation. Assembled a team to propose a solution to improve student behavior by using a learning-focused device.',
-  },
+// One chronology: professional work (filled node); volunteer, leadership and
+// education (hollow node).
+// `present` adds the pulsing ring.
+type Kind = 'work' | 'volunteer' | 'lead' | 'edu';
+const timeline: Array<{ period: string; org: string; role: string; kind: Kind; note?: string; present?: boolean }> = [
+  { period: 'Apr 2026 — Present', org: 'Sertis Teknologi Indonesia', role: 'AI Engineer', kind: 'work', present: true,
+    note: 'Enterprise LLMs and knowledge management.' },
+  { period: 'Jan 2026 — Jul 2026', org: 'TemuCita', role: 'Full Stack Engineer · Volunteer', kind: 'volunteer',
+    note: 'Cita — an AI companion with RAG and memory for a mental-health community.' },
+  { period: 'Sep 2025 — Mar 2026', org: 'Huawei Cloud Indonesia', role: 'Solution Architect Intern', kind: 'work',
+    note: 'Cost-efficient solution architectures; migrated a major telco to Huawei Cloud.' },
+  { period: 'Spring 2025', org: 'Chang Gung University, Taiwan', role: 'Exchange semester · 4.0 GPA', kind: 'edu' },
+  { period: '2024 — 2025', org: 'BINUS University', role: 'Student Mentor', kind: 'lead' },
+  { period: '2023 — 2025', org: 'HIMTI', role: 'Academic Events Activist · Chair, HILET 2024', kind: 'lead',
+    note: 'Seminars, workshops and event operations; led and coordinated HILET 2024.' },
+  { period: 'Aug 2022 — Jan 2023', org: 'Digdaya Duta Digital', role: 'Research Intern', kind: 'work',
+    note: 'E-learning codebase analysis; report on AI/ML for business development.' },
+  { period: 'May 2021 — May 2022', org: 'Cyberindo Aditama', role: 'Research Intern', kind: 'work',
+    note: 'Researched student behaviour in online learning; proposed a learning-focused device.' },
 ];
 
 const researchSkills = ['PyTorch', 'TensorFlow', 'Keras', 'Stable-Baselines3', 'RLlib', 'SUMO', 'NEAT', 'PyGame', 'LangChain', 'Scikit-learn', 'Pandas', 'NumPy', 'Weights & Biases'];
@@ -47,13 +35,21 @@ const certifications = [
 
 <Base
   title="About — Karldritz Farrel Hanson"
-  description="About Karldritz Farrel Hanson — Computer Science student at BINUS University and AI Engineer Intern at Sertis Teknologi Indonesia, working on reinforcement learning and LLM agent systems."
+  description="About Karldritz Farrel Hanson — Computer Science student at BINUS University and AI Engineer at Sertis Teknologi Indonesia, working on reinforcement learning and LLM agent systems."
 >
   <main id="main-content" class="min-h-screen pt-32 px-6 md:px-10 lg:px-16 pb-24">
     <div class="max-w-[1280px] mx-auto">
 
-      <h1 class="fade-up font-display text-6xl md:text-8xl text-ink mb-16 leading-[0.9]">
-        About
+      <!-- Split per character so the reveal can stagger them out of their
+           masks. aria-label keeps it a single word for screen readers. -->
+      <h1
+        data-about-title
+        aria-label="About"
+        class="font-display text-6xl md:text-8xl text-ink mb-16 leading-[0.9]"
+      >
+        {[...'About'].map((char, i) => (
+          <span class="char-mask" aria-hidden="true"><span style={`--i:${i}`}>{char}</span></span>
+        ))}
       </h1>
 
       <div class="grid grid-cols-1 md:grid-cols-12 gap-16 md:gap-24">
@@ -61,21 +57,21 @@ const certifications = [
         <!-- Left: Bio + Contact -->
         <div class="md:col-span-4 space-y-12">
 
-          <div class="reveal">
+          <div class="cascade">
             <p class="font-sans text-base text-ink leading-relaxed">
-              I build reinforcement learning and LLM agent systems that work in the real world.
+              I build reinforcement learning and agentic systems that work in the real world.
             </p>
             <p class="font-sans text-sm text-ink-muted leading-relaxed mt-4">
-              Currently an AI Engineer Intern at Sertis Teknologi Indonesia, conducting extensive learning of enterprise LLMs and knowledge management from industry experts. Volunteering as Full Stack Engineer at TemuCita, building AI chatbot systems. Computer Science student at BINUS University, Jakarta — graduating June 2026 (3.77/4.0 GPA). Studied abroad at Chang Gung University, Taiwan (Spring 2025, 4.0/4.0 GPA).
+              Currently building AI solutions for enterprises at Sertis Teknologi Indonesia. Computer Science student at BINUS University, Jakarta — graduating in 2026. I also often participate in hackathons and do fun side-projects.
             </p>
           </div>
 
-          <div class="reveal">
+          <div class="cascade">
             <h3 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-4">Based in</h3>
             <p class="font-sans text-sm text-ink">Jakarta, Indonesia</p>
           </div>
 
-          <div class="reveal">
+          <div class="cascade">
             <h3 class="font-mono text-xs text-ink-muted uppercase tracking-widest mb-4">Contact</h3>
             <ul class="font-sans text-sm text-ink space-y-2">
               <li>
@@ -116,54 +112,42 @@ const certifications = [
         <!-- Right: Experience, Skills, Certs, Writing -->
         <div class="md:col-span-8 space-y-16">
 
-          <!-- Experience -->
-          <div class="reveal">
-            <h2 class="font-display text-2xl text-ink border-b border-wire pb-4 mb-8">
-              Experience
-            </h2>
-            <div class="space-y-10">
-              {experience.map((job) => (
-                <div>
-                  <div class="flex items-baseline justify-between mb-1 gap-4">
-                    <h4 class="font-sans text-base font-medium text-ink">{job.company}</h4>
-                    <span class="font-mono text-xs text-ink-muted flex-shrink-0">{job.period}</span>
-                  </div>
-                  <p class="font-sans text-sm text-ink-muted italic mb-3">{job.role}</p>
-                  <p class="font-sans text-sm text-ink-muted leading-relaxed">
-                    {job.description}
-                  </p>
-                </div>
-              ))}
+          <!-- Experience — scroll-driven timeline (initTimeline in main.ts) -->
+          <div class="cascade">
+            <div class="flex items-baseline justify-between gap-4 border-b border-wire pb-4 mb-8">
+              <h2 class="font-display text-2xl text-ink">Experience</h2>
+              <p class="font-mono text-[10px] text-ink-muted uppercase tracking-widest flex gap-5" aria-hidden="true">
+                <span><i class="tl-key tl-key-work"></i>Work</span>
+                <span><i class="tl-key"></i>Volunteer · Leadership · Education</span>
+              </p>
+            </div>
 
-              <div>
-                <h4 class="font-sans text-xs font-medium text-ink-muted uppercase tracking-widest mb-4">
-                  Leadership & teaching
-                </h4>
-                <div class="space-y-4">
-                  <div class="flex items-baseline justify-between gap-4">
-                    <span class="font-sans text-sm text-ink">
-                      BINUS University — Student Mentor
-                    </span>
-                    <span class="font-mono text-xs text-ink-muted flex-shrink-0">2024 – 2025</span>
-                  </div>
-                  <div>
-                    <div class="flex items-baseline justify-between gap-4 mb-2">
-                      <span class="font-sans text-sm text-ink">
-                        HIMTI — Academic Events Activist
-                      </span>
-                      <span class="font-mono text-xs text-ink-muted flex-shrink-0">2023 – 2025</span>
+            <div class="tl" data-timeline>
+              <div class="tl-spine" aria-hidden="true"><div class="tl-spine-fill"></div></div>
+              <ol class="tl-list">
+                {timeline.map((e) => (
+                  <li class="tl-item" data-kind={e.kind} data-present={e.present ? 'true' : undefined}>
+                    <div class="tl-gutter" aria-hidden="true">
+                      <span class="tl-node"><span class="tl-pulse"></span></span>
                     </div>
-                    <p class="font-sans text-sm text-ink-muted leading-relaxed">
-                      Assisted and participated in multiple events, including seminars and workshops. Operated event technicals and collaborated with various parties. Chairman of HILET 2024 — led and coordinated the event.
-                    </p>
-                  </div>
-                </div>
-              </div>
+                    <div class="tl-body">
+                      <p class="font-mono text-xs text-ink-muted mb-1">{e.period}</p>
+                      <h4 class="font-sans text-base text-ink leading-snug">
+                        <span class="font-medium">{e.org}</span>
+                        <span class="text-ink-muted"> · {e.role}</span>
+                      </h4>
+                      {e.note && (
+                        <p class="font-sans text-sm text-ink-muted leading-relaxed mt-2 md:truncate">{e.note}</p>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
             </div>
           </div>
 
           <!-- Skills -->
-          <div class="reveal">
+          <div class="cascade">
             <h2 class="font-display text-2xl text-ink border-b border-wire pb-4 mb-6">
               Skills
             </h2>
@@ -215,7 +199,7 @@ const certifications = [
           </div>
 
           <!-- Certifications -->
-          <div class="reveal">
+          <div class="cascade">
             <h2 class="font-display text-2xl text-ink border-b border-wire pb-4 mb-8">
               Certifications
             </h2>
@@ -230,7 +214,7 @@ const certifications = [
           </div>
 
           <!-- Writing -->
-          <div class="reveal">
+          <div class="cascade">
             <h2 class="font-display text-2xl text-ink border-b border-wire pb-4 mb-8">
               Writing
             </h2>
