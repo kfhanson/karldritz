@@ -3,22 +3,35 @@ import { Image, getImage } from 'astro:assets';
 import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import { url } from '../../scripts/url';
+import { normalizeMedia } from '../../lib/media';
 
 export async function getStaticPaths() {
   const projects = (await getCollection('projects')).sort(
     (a, b) => a.data.order - b.data.order
   );
+  // Mirror the home grid's ordering exactly — featured block first, then the
+  // rest — so a card labelled "02" opens a page whose header also reads "02".
   const visible = projects.filter((p) => !p.data.hidden);
+  const ordered = [
+    ...visible.filter((p) => p.data.featured),
+    ...visible.filter((p) => !p.data.featured),
+  ];
+  // Hidden projects are still built (direct link only); they number after the
+  // visible ones so they never collide with a grid number.
+  const hidden = projects.filter((p) => p.data.hidden);
 
   return projects.map((entry) => {
-    const projectIndex = projects.findIndex((p) => p.id === entry.id);
-    // "Next project" cycles through visible projects only.
-    const vi = visible.findIndex((p) => p.id === entry.id);
+    const vi = ordered.findIndex((p) => p.id === entry.id);
+    const displayNumber =
+      vi === -1
+        ? ordered.length + hidden.findIndex((p) => p.id === entry.id) + 1
+        : vi + 1;
+    // "Next project" cycles through visible projects only, in grid order.
     const nextProject =
-      vi === -1 ? visible[0] : visible[(vi + 1) % visible.length];
+      vi === -1 ? ordered[0] : ordered[(vi + 1) % ordered.length];
     return {
       params: { slug: entry.id },
-      props: { entry, displayNumber: projectIndex + 1, nextProject },
+      props: { entry, displayNumber, nextProject },
     };
   });
 }
@@ -40,19 +53,26 @@ const projectLinks = [
 const linksHeading =
   data.type === 'competition' ? 'Sources' : data.type === 'research' ? 'Resources' : 'Links';
 
-// Carousel media — the gallery (mixed images + videos), or the main image alone.
+// Gallery media — mixed images + videos, or the main image alone. Each slide
+// carries a caption (shown under the strip and on its collapsed tab) and an
+// object-fit mode.
 const carousel = data.gallery.length ? data.gallery : [data.thumbnail];
 const slidesData = await Promise.all(
-  carousel.map(async (m) => {
-    if ('width' in m) return { kind: 'image' as const, image: m };
+  carousel.map(async (raw, i) => {
+    const m = normalizeMedia(raw);
+    const caption = m.caption ?? (carousel.length === 1 ? data.title : `${data.title} — ${i + 1}`);
+    if (m.kind === 'image') return { kind: 'image' as const, image: m.image, caption, fit: m.fit };
     return {
       kind: 'video' as const,
       mp4: url(`/${m.src}`),
       webm: m.webm ? url(`/${m.webm}`) : undefined,
       poster: m.poster ? (await getImage({ src: m.poster, width: 1280 })).src : undefined,
+      caption,
+      fit: m.fit,
     };
   })
 );
+const pad2 = (n: number) => String(n).padStart(2, '0');
 ---
 
 <Base
@@ -84,12 +104,13 @@ const slidesData = await Promise.all(
         </h1>
       </header>
 
-      <!-- Coverflow carousel — center card large, neighbours collapse to slats -->
-      <div class="coverflow-wrap mb-12 relative">
+      <!-- Gallery — horizontal accordion: the active slide takes the width, the
+           rest collapse into labelled tabs. Driven by initCoverflow() in main.ts. -->
+      <div class="coverflow-wrap mb-12">
         <div id="coverflow" data-count={slidesData.length} class="coverflow w-full">
           <div class="coverflow-track" data-track>
             {slidesData.map((m, i) => (
-              <div class="coverflow-card bg-panel" data-slide={i}>
+              <div class="coverflow-card" data-slide={i} data-fit={m.fit} data-caption={m.caption}>
                 {m.kind === 'video' ? (
                   <video data-cf-video muted loop playsinline preload="metadata" poster={m.poster}>
                     {m.webm && <source src={m.webm} type="video/webm" />}
@@ -98,31 +119,33 @@ const slidesData = await Promise.all(
                 ) : (
                   <Image
                     src={m.image}
-                    alt={`${data.title} — image ${i + 1}`}
+                    alt={m.caption}
                     widths={[700, 1400]}
-                    sizes="(min-width: 768px) 60vw, 80vw"
+                    sizes="(min-width: 768px) 80vw, 100vw"
                     loading={i === 0 ? 'eager' : 'lazy'}
                   />
                 )}
+                <span class="cf-tab" aria-hidden="true">{m.caption}</span>
               </div>
             ))}
           </div>
+        </div>
 
+        <div class="cf-bar">
+          <p class="cf-caption font-mono text-xs text-ink-muted" data-cf-caption aria-live="polite">
+            {slidesData.length > 1 && (
+              <>
+                <span class="text-ink" data-cf-index>{pad2(1)} / {pad2(slidesData.length)}</span>
+                <span> — </span>
+              </>
+            )}
+            <span data-cf-text>{slidesData[0].caption}</span>
+          </p>
           {slidesData.length > 1 && (
-            <>
-              <button
-                id="cf-prev"
-                type="button"
-                aria-label="Previous image"
-                class="cf-btn absolute top-1/2 -translate-y-1/2 left-3 md:left-5 z-10"
-              >‹</button>
-              <button
-                id="cf-next"
-                type="button"
-                aria-label="Next image"
-                class="cf-btn absolute top-1/2 -translate-y-1/2 right-3 md:right-5 z-10"
-              >›</button>
-            </>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <button id="cf-prev" type="button" aria-label="Previous slide" class="cf-btn">‹</button>
+              <button id="cf-next" type="button" aria-label="Next slide" class="cf-btn">›</button>
+            </div>
           )}
         </div>
       </div>
