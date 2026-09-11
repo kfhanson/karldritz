@@ -110,8 +110,11 @@ export function initShader(canvas: HTMLCanvasElement): (() => void) | null {
   const uResolution = gl.getUniformLocation(program, 'u_resolution');
 
   const resize = () => {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // Render at reduced resolution — the noise is soft, so the CSS upscale is
+    // invisible, and the fragment shader does ~2.8× less work per frame.
+    const scale = 0.6;
+    canvas.width = Math.round(window.innerWidth * scale);
+    canvas.height = Math.round(window.innerHeight * scale);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.uniform2f(uResolution, canvas.width, canvas.height);
   };

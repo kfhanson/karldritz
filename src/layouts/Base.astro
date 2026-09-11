@@ -17,7 +17,7 @@ const ogImageUrl = ogImage && Astro.site ? new URL(ogImage, Astro.site).href : u
 ---
 
 <!DOCTYPE html>
-<html lang="en" class="no-js">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -44,11 +44,26 @@ const ogImageUrl = ogImage && Astro.site ? new URL(ogImage, Astro.site).href : u
     />
 
     <link rel="icon" href={url('/favicon.ico')} type="image/x-icon" />
-    <!-- data-astro-rerun: the ClientRouter swap restores the static html
-         attributes (re-adding no-js) but skips already-executed inline scripts,
-         so this must re-run on every navigation or the no-js CSS fallback
-         kicks in and breaks the carousel until a hard refresh. -->
-    <script is:inline data-astro-rerun>document.documentElement.classList.remove('no-js');</script>
+    <!-- No-JS fallback: content is hidden by default for the reveal animations;
+         without scripts, show everything and flatten the gallery. Living in
+         <noscript> means nothing toggles at runtime — no flash on navigation. -->
+    <noscript>
+      <style>
+        .reveal, .fade-up, .shader-fade, .nav-intro, .cascade,
+        .word-mask > span, .char-mask > span, .tl-body {
+          opacity: 1 !important;
+          transform: none !important;
+          animation: none !important;
+          transition: none !important;
+        }
+        .tl-spine-fill { transform: none !important; }
+        .coverflow { overflow: visible; height: auto !important; }
+        .coverflow-track { flex-direction: column; transform: none !important; }
+        .coverflow-card { width: 100% !important; height: auto !important; margin: 0 0 1rem !important; }
+        .coverflow-card img, .coverflow-card video { height: auto; }
+        .coverflow-card::after, .cf-tab, .cf-btn { display: none; }
+      </style>
+    </noscript>
     <ClientRouter />
   </head>
   <body class="relative w-full min-h-screen bg-canvas text-ink">
