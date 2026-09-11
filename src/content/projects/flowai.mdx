@@ -6,17 +6,17 @@ year: '2025'
 role: Team Leader, Lead ML Engineer
 summary: Multi-agent RL for city-wide traffic control. Huawei Developer Competition 2025 APAC Grand Finalist.
 thumbnail: ../../images/flowai-sec.jpeg
-hoverThumbnail: { src: videos/flowai-main.mp4 }
+hoverThumbnail: { src: videos/flowai-main.mp4, poster: ../../images/flowai-main-poster.jpeg }
 gallery:
-  - { src: videos/flowai-main.mp4 }
-  - { src: videos/flowai1.mp4 }
-  - ../../images/flowai-sec.jpeg
+  - { src: videos/flowai-main.mp4, poster: ../../images/flowai-main-poster.jpeg, caption: 'Intersection agents running in SUMO' }
+  - { src: videos/flowai1.mp4, poster: ../../images/flowai1-poster.jpeg, caption: 'Concept video' }
+  - { image: ../../images/flowai-sec.jpeg, caption: 'APAC Grand Final, Hong Kong', fit: contain }
 techStack: [Python, Huawei Cloud, SUMO, MARL, IoT]
 metrics:
   - { value: 'Grand Finalist', label: 'Huawei APAC 2025' }
-  - { value: '6×', label: 'Vehicles processed vs fixed-cycle' }
-  - { value: '73% faster', label: 'Edge vs cloud-only' }
-  - { value: 'Hong Kong — PolyU', label: 'Pitched at' }
+  - { value: 'Hong Kong final', label: 'Pitched at PolyU' }
+  - { value: 'Traffic control', label: 'City-wide TMaaS platform' }
+  - { value: 'ML + Cloud', label: 'Multi-agent RL, edge-cloud, IoT' }
 featured: true
 order: 1
 # Add competition sources here (shown under "Sources"), e.g.:
@@ -26,15 +26,13 @@ links:
 #   - { label: 'Demo video', url: 'https://...' }
 ---
 
-## The brief
+## Overview
 
-CitiFlowAI was built for the **Huawei Developer Competition 2025 (Asia Pacific)** — a
-build-and-pitch contest judged across four weighted dimensions: technical architecture
-(30%), creativity and innovation (30%), functionality and impact (20%), and business
-value (20%). We were one of the team that went to the APAC Grand Final in
-Hong Kong, where we pitched at PolyU as the **only team representing Indonesia** in our track.
+CitiFlowAI was built for the **Huawei Developer Competition 2025 (Asia Pacific)**. We
+reached the APAC Grand Final in Hong Kong, pitching at PolyU as the **only team representing
+Indonesia** in our track.
 
-## The idea
+## The problem
 
 CitiFlowAI is an intelligent **Traffic Management as a Service (TMaaS)** platform built on
 Huawei Cloud. We anchored it to a problem we live with: in the Greater Jakarta area,
@@ -52,7 +50,7 @@ that predicts and prevents gridlock before it forms, and the agents cooperate to
 subscription, TMaaS turns a massive upfront CAPEX project into a predictable OPEX line —
 which is what actually unblocks adoption for cash-constrained cities.
 
-## My role
+## What I did
 
 I led the team and owned the machine-learning work, including framing the problem as multi-agent RL, 
 building the SUMO simulation and the ModelArts training pipeline, and coordinating the team into the
@@ -99,18 +97,14 @@ the action space (phase selection vs. green-time duration), the reward shaping, 
 exact algorithm (QMIX / MAPPO / IQL...). And one honest story beat: what was hardest to get
 stable under the clock, and what you cut to make the finals. A cloud-edge diagram lands here. */}
 
-## Pitch day
+## Outcome
 
-The judging panel skewed heavily business — finance, management, smart-city development —
-so we balanced the technical depth against a hard commercial case: TMaaS shifts cities from
-CAPEX to OPEX, we projected ~73% gross margin on a standard pilot, and we sized the
-Indonesian ITS market at USD 6.8B (2025) growing to USD 18.7B by 2031 (17.9% CAGR), inside an
-APAC smart-cities market that's the largest in the world. We closed on the demo.
+Alongside the technical demo we made the commercial case: delivered as TMaaS, the platform
+turns a large upfront CAPEX project into a predictable subscription, which is what makes it
+adoptable for cash-constrained cities. We closed on the live demo.
 
 {/* TODO: the room itself — Hong Kong, PolyU, a judge question you remember, how the demo
 landed. This is the part that makes the Grand Finalist result feel real. */}
-
-## Outcome & takeaways
 
 In simulation, the MARL agents processed **6× more vehicles** than a traditional
 fixed-cycle baseline, and the edge-cloud architecture ran **~73% faster** than a cloud-only
@@ -121,6 +115,8 @@ It is unfortunate that we were unable to make it to the podium, other teams such
 and better business models, while others had real use-cases. I feel that's where we fall short, as we were still students without any real 
 implementation or use-case, and the product we showcased was still ultimately a simulation.
 
+## What I learned
+
 This event has given me a big wake-up call, especially in handling a team and performing in a competition. I feel that I still had so much
 to learn, and this experience has taught me a lot. Even so, I am truly grateful to be able to be in the grand finalist position in my
-first ever competition. 
+first ever competition.

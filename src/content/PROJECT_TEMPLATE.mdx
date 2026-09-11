@@ -1,0 +1,82 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT TEMPLATE — copy to projects/<slug>.mdx (the filename is the URL).
+# Lives outside projects/ so the content loader never picks it up.
+#
+# House rules (keep every project consistent):
+#   • Body 500–800 words. Six sections, in this order, same headings:
+#       Overview · The problem · What I did · Building it · Outcome · What I learned
+#     "What I did" is optional for solo work (the sidebar already shows Role).
+#     Sub-headings inside Building it use ### — never add new ## sections.
+#   • Write for a reader who doesn't know the event: what it is, why it matters,
+#     what you built, what happened. Skip judging rubrics, schedules, market
+#     sizing, prize mechanics, team-member names, anything they don't need.
+#   • Numbers: only ones that describe the work or the problem, never padding.
+#   • Metrics are the sidebar summary — 3–5 items, value ≤16 chars, label ≤30:
+#       1. context + result      (Grand Finalist / Huawei APAC 2025)
+#       2. presentation/delivery (Pitched at PolyU · Presented online · Live in platform)
+#       3. what it is            (one or more)
+#       4. areas touched         (ML + Cloud / Multi-agent RL, edge-cloud, IoT)
+#     No role here — Role has its own field.
+#   • Gallery: every item gets a caption; videos get a poster; use fit: contain
+#     for portraits or slides. Drop images in src/images/, videos in public/videos/.
+#   • summary ≤ 160 chars — it's the grid blurb and the meta description.
+# ─────────────────────────────────────────────────────────────────────────────
+title: Project Name
+category: Area / Sub-area
+# research = paper-style, competition = event-style, project = default (no tag)
+type: project
+year: '2026'
+role: What you were on it
+summary: One sentence — what it is, for whom, and the outcome.
+thumbnail: ../../images/<slug>.jpeg   # paths are relative to projects/
+# hoverThumbnail: { src: videos/<slug>.mp4, poster: ../../images/<slug>-poster.jpeg }
+gallery:
+  - { image: ../../images/<slug>.jpeg, caption: 'What this shows' }
+  # - { src: videos/<slug>.mp4, poster: ../../images/<slug>-poster.jpeg, caption: 'What this shows' }
+  # - { image: ../../images/<slug>-2.jpeg, caption: 'Portrait or slide', fit: contain }
+techStack: [Python, PyTorch]
+metrics:
+  - { value: 'Result', label: 'Event · Year' }
+  - { value: 'Presented', label: 'Where / how' }
+  - { value: 'What it is', label: 'One line' }
+  - { value: 'Area + Area', label: 'Fields touched' }
+featured: false
+hidden: true      # flip to false when it's ready for the grid
+order: 99         # grid + next-project order; lower = earlier
+# link: https://...      → "Live site"
+# paper: https://...     → "Paper"
+# github: https://...    → "GitHub"
+links: []
+#   - { label: 'Demo video', url: 'https://...' }
+---
+
+## Overview
+
+Two to four sentences. What it is, who it's for, the context (competition, venue,
+volunteer, coursework), and the outcome in one line.
+
+## The problem
+
+Why this mattered — one or two paragraphs. A couple of grounding numbers at most.
+What existing approaches get wrong, in a sentence.
+
+## What I did
+
+Your ownership on the project: what you framed, built, and drove. One paragraph.
+Delete this section for solo work.
+
+## Building it
+
+The technical core — two to four paragraphs or a short bullet list. Architecture,
+the key decision(s), the piece you're proudest of and why. Use `###` for
+sub-sections if it needs them.
+
+## Outcome
+
+What happened: result, publication, pitch, ship. One or two paragraphs. Include
+honest context (what fell short) if it's part of the story.
+
+## What I learned
+
+One paragraph. Concrete, not generic.

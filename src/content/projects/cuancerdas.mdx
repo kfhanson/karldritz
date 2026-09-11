@@ -6,34 +6,30 @@ year: '2026'
 role: Team Lead
 summary: AI finance copilot for Indonesian MSMEs — auto-generated reports + a grounded advisor chatbot. Paylabs × Alibaba Cloud Hackathon, 2nd place.
 thumbnail: ../../images/cuancerdas.jpeg
-# Media — grid-hover preview + case-study carousel. Both accept images (bare path
-# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
-# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
-# hoverThumbnail: ../../images/cuancerdas.jpeg
-# gallery:
-#   - ../../images/cuancerdas.jpeg
-#   - { src: videos/cuancerdas-demo.mp4 }
+# hoverThumbnail / gallery: add a demo capture or video when you have one —
+# { image: ../../images/x.jpeg, caption: '…' } or { src: videos/x.mp4, poster: ../../images/x.jpeg, caption: '…' }
 techStack: [TypeScript, Fastify, Prisma, PostgreSQL, Qwen, MCP, WebSocket, Alibaba Cloud]
 metrics:
-  - { value: '2nd place', label: 'Paylabs × Alibaba 2026' }
-  - { value: 'Report + advisor', label: 'Two grounded AI agents' }
-  - { value: 'MCP tool layer', label: 'Numbers stay deterministic' }
+  - { value: '2nd place', label: 'Paylabs × Alibaba Cloud 2026' }
+  - { value: 'Final demo pitch', label: 'BINUS University' }
+  - { value: 'Finance copilot', label: 'Reports + advisor chatbot' }
+  - { value: 'MCP grounding', label: 'Qwen over Paylabs data' }
+  - { value: 'LLM + Full-stack', label: 'Agents, MCP, Fastify, Postgres' }
 featured: true
-order: 3
+order: 2
 links:
   - { label: 'Winners announcement', url: 'https://www.instagram.com/p/DVgBOhalKwH/' }
   - { label: 'News', url: 'https://edukasi.kompas.com/read/2026/03/17/183245671/gelar-mini-hackathon-2026-paylabs-gandeng-alibaba-cloud-indonesia-dan-binus' }
-#   - { label: 'GitHub', url: 'https://...' }
 ---
 
-## The brief
+## Overview
 
 CuanCerdas was built for the **Paylabs × Alibaba Cloud Mini Hackathon 2026** — a
 build-and-pitch competition judged on a live demo, run on Alibaba Cloud infrastructure
 with Paylabs (a payment gateway) as the data partner. I led a four-person team — Team Jo —
 through the build, and we placed **2nd**.
 
-## The idea
+## The problem
 
 We bet on **financial literacy for Indonesian MSMEs (UMKM)**. The gap is real and large:
 **87% of UMKM** don't do basic financial management — budgeting, recording, reporting,
@@ -49,7 +45,7 @@ into a clean, structured financial report — and a chatbot, **JO**, that explai
 in plain language and advises on it. The framing we pitched on: *"we don't just tell UMKM how
 much money they make — we teach them how to manage and grow it through AI."*
 
-## My role
+## What I did
 
 I led the team as **Team Lead** and worked **full-stack** across the build — the agent
 design and the MCP grounding layer, the Fastify backend and report pipeline, and the live
@@ -91,7 +87,11 @@ on **Alibaba Cloud** (ECS for compute, OSS for storage), with the agent powered 
 {/* TODO (optional): name the one obstacle you hit under the clock — what you had to cut or
 fake to ship, and how the callback/streaming split came together late. */}
 
-## Pitch day
+## Outcome
+
+We finished **2nd place** with a working technical MVP — not just a concept deck: real async
+report generation, real streaming advisor responses, structured DB-backed persistence, and
+merchant-scoped, deterministic data access through the MCP tool layer.
 
 We pitched the business case as hard as the demo: a **freemium** model where basic reporting
 and general literacy education are free for every Paylabs merchant, with the deep AI mentor
@@ -101,11 +101,5 @@ and predictive analysis behind a monthly subscription — turning Paylabs from a
 {/* TODO: the room itself — who you pitched to, how the live demo of JO landed, a judge
 question you remember. This is the part that makes the 2nd-place result land. */}
 
-## Outcome & takeaways
-
-We finished **2nd place** with a working technical MVP — not just a concept deck: real async
-report generation, real streaming advisor responses, structured DB-backed persistence, and
-merchant-scoped, deterministic data access through the MCP tool layer.
-
-{/* TODO: honest reflection — what you'd change about the report/advisor split or the
-grounding design, and what leading a team under hackathon pressure taught you. */}
+{/* TODO: ## What I learned — one paragraph: what you'd change about the report/advisor
+split or the grounding design, and what leading a team under hackathon pressure taught you. */}

@@ -6,22 +6,19 @@ year: '2024'
 role: AI Engineer
 summary: Evolving autonomous-driving controllers with NEAT — peak fitness 84/98/100 across three tracks. Published at ICORIS 2024.
 thumbnail: ../../images/av-sim-poster.jpeg
-# Media — grid-hover preview + case-study carousel. Both accept images (bare path
-# like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
-# src/images/ (images) or public/videos/ (videos), then uncomment and list them.
 hoverThumbnail: { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
 gallery:
-  - { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
-  - ../../images/autove.jpeg
+  - { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg, caption: 'NEAT-evolved cars lapping the track' }
+  - { image: ../../images/autove.jpeg, caption: 'Presenting the paper at ICORIS 2024' }
 techStack: [Python, NEAT, Pyglet, Genetic Algorithms, Neural Networks]
 metrics:
-  - { value: 'Published', label: 'ICORIS 2024' }
-  - { value: '84 / 98 / 100', label: 'Peak fitness, Tracks A/B/C' }
-  - { value: 'Pop 60 · 0.8 mut', label: 'Best NEAT config' }
+  - { value: 'Published', label: 'IEEE ICORIS 2024' }
+  - { value: 'Presented online', label: 'ICORIS 2024 session' }
+  - { value: 'AV controllers', label: 'Evolved with NEAT, 3 tracks' }
+  - { value: 'Neuroevolution', label: 'Genetic algorithms, simulation' }
 featured: true
-order: 5
+order: 3
 paper: https://doi.org/10.1109/ICORIS63540.2024.10903833
-# Extra labeled links shown under "Resources" — e.g. demo, slides, repo.
 links:
   - { label: 'Demo video', url: 'https://www.youtube.com/watch?v=CB4Qjc4w1Dk' }
 ---
@@ -41,7 +38,7 @@ its weights emerge together from selection pressure over generations. NEAT is we
 because it grows the simplest effective topology incrementally and preserves diverse
 solutions via speciation, rather than fixing the architecture up front.
 
-## Approach
+## Building it
 
 Each car is a 2D object equipped with **distance sensors** (rays cast around the vehicle).
 Those readings feed a neural network whose four outputs are **accelerate, brake, turn left,
@@ -56,7 +53,7 @@ and mutation rate to see how each configuration converges. Against the default (
 mutation 0.6), I compared three tunings: **Tuning 1** (20 / 0.5), **Tuning 2** (60 / 0.8), and
 **Tuning 3** (80 / 0.4).
 
-## Results
+## Outcome
 
 **Tuning 2 (population 60, mutation rate 0.8) was the strongest overall**, rising fastest in
 early generations and reaching peak fitness scores of **84, 98, and 100 on Tracks A, B, and

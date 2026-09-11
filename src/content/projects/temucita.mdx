@@ -1,0 +1,163 @@
+---
+title: TemuCita AI Companion
+category: AI Companion / Agentic LLM
+type: project
+year: '2025'
+role: Volunteer — Solo Full-Stack & AI Engineer
+summary: Cita, an AI companion built for TemuCita, an Indonesian mental-health community — a safe space to talk that remembers, answers from vetted material, and points people toward real support.
+thumbnail: ../../images/temucita.png
+# hoverThumbnail: — add a SECOND asset (a chat mid-conversation, or a demo video)
+# before setting this; crossfading to the same image as the thumbnail does nothing.
+# Case-study carousel. Add more screenshots (a chat mid-conversation showing
+# retrieval, the admin document dashboard) or a demo video as they're captured.
+gallery:
+  - { image: ../../images/temucita.png, caption: 'Cita — the companion chat inside TemuCita' }
+techStack: [TypeScript, Next.js, Prisma, PostgreSQL, pgvector, Amazon Bedrock, AWS S3, Google Cloud, Clerk]
+metrics:
+  - { value: 'Volunteer build', label: 'Mental-health community' }
+  - { value: 'Live in platform', label: 'Shipped at /ai-companion' }
+  - { value: 'AI companion', label: 'RAG + memory, grounded answers' }
+  - { value: 'Bahasa Indonesia', label: 'Speaks the way members do' }
+  - { value: 'LLM + Full-stack', label: 'RAG, Bedrock, Next.js, Postgres' }
+featured: false
+order: 4
+# Extra labeled links shown under "Resources" — e.g. demo, write-up, repo.
+links:
+  - { label: 'Talk to Cita', url: 'https://temucita.io/ai-pendamping/chat' }
+---
+
+## Overview
+
+**TemuCita** is an Indonesian mental-health community — a place where people find sessions,
+support, and each other. **Cita** is the AI companion I built for it: a chat you can open at
+2am when there's no one to message, that greets you in Bahasa Indonesia with *"ini adalah
+ruang aman untuk berbicara"* — this is a safe space to talk.
+
+I built it as a **volunteer project**, alone, from an empty repository to a feature running
+inside TemuCita's platform at `/ai-companion`.
+
+## The problem
+
+A community can offer sessions and events, but the moment someone actually needs to say
+something out loud rarely lines up with a booking calendar. The gap is the 2am gap: the
+stretch between *feeling something* and *being able to talk to a person about it*.
+
+A generic chatbot doesn't fill that gap well. Three things go wrong. It answers from
+whatever it absorbed in training rather than from material the community trusts — dangerous
+in a wellness context where confident, wrong advice does real harm. It forgets: every
+session starts from zero, so the person has to re-explain themselves, which is exactly the
+labour they came here to avoid. And it's a dead end — it talks, and then nothing happens,
+when the honest outcome for most conversations is *there is a person and an event that can
+help you with this*.
+
+So Cita is built around the opposite of those three. Everything it says is grounded in
+documents the community curates. It remembers — within a conversation and across them. And
+when something in the community genuinely fits what someone is going through, it says so.
+
+## Building it
+
+### In use
+
+You land on a quiet, warm page — the palette is terracotta, chosen to feel calm and to hold
+up to WCAG AA contrast — with one text box and a few openings for when you don't know how
+to start: *Refleksi dan Pahami Dirimu*, *Merasa Sedih*, *Sulit Tidur*, *Cari Kejernihan*.
+Reflect and understand yourself. Feeling sad. Trouble sleeping. Looking for clarity.
+
+You type. The reply streams back word by word rather than landing as a finished block, so
+the pause before an answer feels like someone thinking instead of a spinner. The
+conversation names itself from your first exchange and goes into a sidebar you can search
+and delete from — because chat history in a mental-health context is *your* record, and
+deleting it has to be one click.
+
+Come back next week and it still knows you. Not the transcript verbatim, but the shape of
+you: what you've been dealing with, what you said helps.
+
+### Under the hood
+
+The whole thing is one **Next.js (App Router)** app on **PostgreSQL** with **pgvector**,
+**Prisma** as the ORM, and **Clerk** for sign-in and admin access. Source documents live in
+object storage. The data model stays deliberately small — seven tables: `User`,
+`UserProfile`, `Chat`, `Message`, `Document`, `DocumentChunk`, `Event`.
+
+**Grounded answers.** Community admins upload PDFs or text through a dashboard. Each
+document is split into ~800-character chunks that break on sentence and paragraph
+boundaries, turned into vectors, and stored. When someone writes a message, that message
+becomes a vector too, and a cosine-distance search finds the passages closest to it — but
+only ones within a `0.75` distance make the cut, and only the top four are handed to the
+model. The threshold matters more than it looks: too loose and Cita starts citing material
+that's merely topic-adjacent, which reads as confident nonsense. Better to answer with
+nothing retrieved than with something almost relevant.
+
+**Memory.** Long conversations outgrow the context window, so Cita keeps a rolling summary.
+Once enough messages pile up, the oldest fifteen are condensed into a ~200-word third-person
+summary that preserves the facts, decisions, and preferences someone has shared, and that
+gets appended to the conversation's running summary. Recent messages stay word-for-word;
+older ones live on as gist. Cheap, and it means a conversation can run for weeks.
+
+**Knowing the user.** Across sessions, a small profile — a one-line summary plus an
+interests list like `["anxiety", "sleep issues", "mindfulness"]` — is extracted in the
+background from conversation history and folded into Cita's instructions. It's deliberately
+small. A long inferred dossier on someone's mental state is both worse for responses and a
+thing I didn't want to be storing.
+
+**Pointing somewhere real.** On each turn, the app also searches an admin-managed events
+table using the current message plus that profile. The threshold here is tighter — `0.65` —
+because a badly matched event suggestion is worse than none at all. It reads as being sold
+to at the exact moment someone made themselves vulnerable. Clear the bar and Cita mentions
+it; don't, and it stays quiet.
+
+### A deliberate non-decision
+
+Early on I considered a LangGraph-style multi-agent orchestration layer and decided against
+it. The pipeline is honestly linear — message in, maybe retrieve, model, response out — and
+a graph orchestrator would have added moving parts, failure modes, and latency for a shape
+that doesn't branch. Reaching for the heavier pattern would have looked more impressive in a
+diagram and made the product worse.
+
+So it's worth being precise about what *agentic* means on this project. It doesn't mean a
+planner loop or a graph of agents negotiating with each other. It means the model never
+answers from itself alone: every turn, the application assembles what it's allowed to know —
+retrieved passages from the community's documents, the running summary of this conversation,
+the user's standing profile, any event that clears the relevance bar — and the model works
+from that. The orchestration is real; it just lives in ordinary application code, where I can
+read it, test it, and reason about what happens when a step returns nothing.
+
+That's the trade I'd make again. Putting the control flow in the model buys flexibility a
+linear pipeline doesn't need, and pays for it in exactly the currency this project can't
+spend: predictability about what a vulnerable person is told.
+
+### Running it on two clouds
+
+Cita has lived on both major clouds. The first version ran on **Google Cloud**; it now runs
+on **AWS**, with **Amazon Bedrock** serving both the streaming chat model and the embedding
+model, S3 holding the documents, and one set of IAM credentials covering all of it instead
+of a separate API key per service.
+
+The move was contained rather than painful, because of one early call: the embedding layer
+was designed around a fixed **3072-dimension** vector space. Choosing a replacement that
+produced the same dimensionality meant the vector column, the index, and every stored
+embedding stayed exactly as they were. The provider changed; the data didn't.
+
+## Outcome
+
+Cita shipped. It runs inside TemuCita's platform at `/ai-companion` rather than as a
+separate site members have to be sent to — same login, same database, same product. The
+knowledge base is maintained by the people who own the content: an admin uploads a document
+and it's retrievable immediately, with no deploy and no developer in the loop.
+
+{/* TODO: the numbers that would make this land. Anything real helps — documents in the
+knowledge base, conversations since launch, members using it, or a line of feedback from
+someone at TemuCita about what it changed for them. In a volunteer community project, one
+honest quote is worth more than a benchmark. */}
+
+## What I learned
+
+Building alone for a community with a real duty of care made restraint feel like the actual
+engineering work. A tight retrieval threshold, a rolling summary, a deliberately thin user
+profile, and a rejected orchestration layer did more for the quality of Cita's answers than
+any heavier architecture would have — and each of those decisions was, in the end, about
+what *not* to say and what *not* to store.
+
+The other lesson was cheaper and more portable: pick your embedding dimensionality
+deliberately and early. It's an unglamorous decision that quietly determines whether
+changing your mind about a model provider later is an afternoon or a rewrite.
