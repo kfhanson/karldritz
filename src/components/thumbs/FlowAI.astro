@@ -1,0 +1,130 @@
+---
+// CitiFlowAI — a city grid where every intersection is an agent. Cars flow along
+// the roads, signals cycle, and a "green wave" pulses down the main corridor.
+interface Props { label: string }
+const { label } = Astro.props;
+
+const H = [100, 200];             // horizontal road y
+const V = [150, 300, 450, 610];   // vertical road x
+const crossings = H.flatMap((y) => V.map((x) => ({ x, y })));
+
+// City blocks: one or two buildings per cell, deterministic so SSR is stable.
+const XS = [-20, ...V, 780];
+const YS = [-20, ...H, 320];
+const blocks: Array<{ x: number; y: number; w: number; h: number }> = [];
+XS.slice(0, -1).forEach((x0, i) => {
+  YS.slice(0, -1).forEach((y0, j) => {
+    const x1 = XS[i + 1], y1 = YS[j + 1];
+    const pad = 16, gap = 8;
+    const w = x1 - x0 - pad * 2, h = y1 - y0 - pad * 2;
+    if ((i + j) % 3 === 0) {
+      blocks.push({ x: x0 + pad, y: y0 + pad, w, h });
+    } else if ((i + j) % 3 === 1) {
+      blocks.push({ x: x0 + pad, y: y0 + pad, w: w * 0.55 - gap / 2, h });
+      blocks.push({ x: x0 + pad + w * 0.55 + gap / 2, y: y0 + pad, w: w * 0.45 - gap / 2, h });
+    } else {
+      blocks.push({ x: x0 + pad, y: y0 + pad, w, h: h * 0.5 - gap / 2 });
+      blocks.push({ x: x0 + pad, y: y0 + pad + h * 0.5 + gap / 2, w, h: h * 0.5 - gap / 2 });
+    }
+  });
+});
+---
+
+<svg viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label={label} class="fa">
+
+  <!-- City blocks -->
+  <g class="fa-blocks">
+    {blocks.map((b) => <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="3" />)}
+  </g>
+
+  <!-- Roads -->
+  <g class="fa-road">
+    {H.map((y) => <line x1="0" y1={y} x2="760" y2={y} />)}
+    {V.map((x) => <line x1={x} y1="0" x2={x} y2="300" />)}
+  </g>
+  <g class="fa-lane">
+    {H.map((y) => <line x1="0" y1={y} x2="760" y2={y} />)}
+    {V.map((x) => <line x1={x} y1="0" x2={x} y2="300" />)}
+  </g>
+
+  <!-- Green wave down the top corridor -->
+  <g class="fa-wave">
+    {V.map((x, i) => <circle cx={x} cy={H[0]} r="10" style={`--i:${i}`} />)}
+  </g>
+
+  <!-- Signals: one agent per intersection, phased so the grid reads as coordinated -->
+  <g class="fa-sig">
+    {crossings.map(({ x, y }, i) => <circle cx={x} cy={y} r="3.5" style={`--i:${i}`} />)}
+  </g>
+
+  <!-- Cars -->
+  <g class="fa-cars">
+    <rect class="fa-car" style="--p: path('M -20 100 H 780'); --d: 9s;  --o: 0s"   x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M -20 100 H 780'); --d: 9s;  --o: -4s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 780 200 H -20'); --d: 11s; --o: -2s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 780 200 H -20'); --d: 11s; --o: -7s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 300 -20 V 320');  --d: 7s;  --o: -1s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 450 320 V -20');  --d: 8s;  --o: -5s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 610 -20 V 320');  --d: 10s; --o: -3s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+    <rect class="fa-car" style="--p: path('M 150 320 V -20');  --d: 9s;  --o: -6s"  x="-8" y="-3.5" width="16" height="7" rx="2" />
+  </g>
+
+  <!-- Edge feather: painted once, unlike mask-image which re-composites the
+       whole animated SVG every frame. -->
+  <defs>
+    <linearGradient id="fa-fx" x1="0" x2="1"><stop offset="0" class="fa-s1" /><stop offset="0.18" class="fa-s0" /><stop offset="0.82" class="fa-s0" /><stop offset="1" class="fa-s1" /></linearGradient>
+    <linearGradient id="fa-fy" x1="0" x2="0" y1="0" y2="1"><stop offset="0" class="fa-s1" /><stop offset="0.22" class="fa-s0" /><stop offset="0.78" class="fa-s0" /><stop offset="1" class="fa-s1" /></linearGradient>
+  </defs>
+  <rect width="760" height="300" fill="url(#fa-fx)" pointer-events="none" />
+  <rect width="760" height="300" fill="url(#fa-fy)" pointer-events="none" />
+</svg>
+
+<style>
+  .fa-s1 { stop-color: var(--color-canvas); stop-opacity: 1; }
+  .fa-s0 { stop-color: var(--color-canvas); stop-opacity: 0; }
+  .fa-blocks rect { fill: #fff; stroke: var(--color-wire); stroke-width: 1; }
+  .fa-road line { stroke: var(--color-wire); stroke-width: 16; }
+  .fa-lane line { stroke: var(--color-ink-muted); stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+
+  .fa-sig circle {
+    fill: var(--color-pine);
+    animation: fa-signal 6s steps(1, end) infinite;
+    animation-delay: calc(var(--i) * -0.75s);
+  }
+  /* opacity only — animating fill repaints the whole SVG */
+  @keyframes fa-signal {
+    0%, 45%  { opacity: 1; }
+    50%, 95% { opacity: 0.3; }
+  }
+
+  .fa-wave circle {
+    fill: none;
+    stroke: var(--color-pine);
+    stroke-width: 2;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fa-wave 6s ease-out infinite;
+    animation-delay: calc(var(--i) * 0.45s);
+  }
+  @keyframes fa-wave {
+    0%       { transform: scale(0.3); opacity: 0; }
+    5%       { opacity: 0.9; }
+    40%,100% { transform: scale(3.4); opacity: 0; }
+  }
+
+  /* Motion-path cars: hidden where offset-path is unsupported so nothing piles up at 0,0 */
+  .fa-car { display: none; fill: var(--color-ink); }
+  @supports (offset-path: path('M 0 0 H 1')) {
+    .fa-car {
+      display: block;
+      offset-path: var(--p);
+      offset-rotate: auto;
+      animation: fa-drive var(--d) linear infinite;
+      animation-delay: var(--o);
+    }
+  }
+  @keyframes fa-drive {
+    from { offset-distance: 0%; }
+    to   { offset-distance: 100%; }
+  }
+</style>

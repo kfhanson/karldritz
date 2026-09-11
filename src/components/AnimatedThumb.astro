@@ -1,0 +1,31 @@
+---
+// Animated SVG thumbnail for a project card. Resolves the project slug to one of
+// the hand-drawn thumbs in ./thumbs; when there is none, renders the slot (the
+// static <ProjectImage>) so the grid degrades per-project.
+//
+// Playback is gated by `data-playing`, toggled by initAnimatedThumbs() in
+// main.ts when the card scrolls into view — the CSS in global.css pauses every
+// animation inside while it is off-screen.
+import { THUMBS } from './thumbs';
+
+interface Props {
+  slug: string;
+  label: string;
+  heightClass: string;
+}
+
+// heightClass is only consumed by the <ProjectImage> fallback in the slot.
+const { slug, label } = Astro.props;
+const Thumb = THUMBS[slug];
+---
+
+{Thumb ? (
+  <div
+    data-anim-thumb
+    class="anim-thumb w-full aspect-[760/300]"
+  >
+    <Thumb label={label} />
+  </div>
+) : (
+  <slot />
+)}

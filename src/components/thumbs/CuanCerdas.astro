@@ -1,0 +1,151 @@
+---
+// CuanCerdas — Paylabs transactions become a structured report (bars + trend line),
+// and JO, the advisor chatbot, explains it in plain language.
+interface Props { label: string }
+const { label } = Astro.props;
+
+// Monthly revenue bars: [x, height]. Baseline at y=222.
+const BARS = [[92, 60], [132, 84], [172, 72], [212, 110], [252, 96], [292, 138], [332, 124]];
+const BASE = 222;
+const trend = BARS.map(([x, h]) => `${x + 12} ${BASE - h - 14}`).join(' L ');
+---
+
+<svg viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label={label} class="cc">
+
+  <!-- Report card -->
+  <g class="cc-card">
+    <rect x="60" y="48" width="320" height="204" rx="8" />
+    <line x1="80" y1="76" x2="170" y2="76" class="cc-title" />
+    <line x1="80" y1="90" x2="130" y2="90" class="cc-sub" />
+    <line x1="80" y1={BASE} x2="360" y2={BASE} class="cc-axis" />
+    <g class="cc-bars">
+      {BARS.map(([x, h], i) => (
+        <rect x={x} y={BASE - h} width="24" height={h} rx="2" style={`--i:${i}; --h:${h}`} />
+      ))}
+    </g>
+    <path d={`M ${trend}`} class="cc-trend" pathLength="1" />
+    {BARS.map(([x, h], i) => (
+      <circle cx={x + 12} cy={BASE - h - 14} r="2.5" class="cc-dot" style={`--i:${i}`} />
+    ))}
+  </g>
+
+  <!-- Chat with JO -->
+  <g class="cc-chat">
+    <!-- merchant asks -->
+    <g class="cc-user">
+      <rect x="470" y="70" width="230" height="46" rx="14" />
+      <line x1="490" y1="86" x2="670" y2="86" />
+      <line x1="490" y1="100" x2="600" y2="100" />
+    </g>
+    <!-- typing indicator -->
+    <g class="cc-typing">
+      <rect x="430" y="140" width="62" height="30" rx="14" />
+      <circle cx="449" cy="155" r="3" style="--i:0" />
+      <circle cx="461" cy="155" r="3" style="--i:1" />
+      <circle cx="473" cy="155" r="3" style="--i:2" />
+    </g>
+    <!-- JO answers, grounded in the report -->
+    <g class="cc-jo">
+      <rect x="430" y="140" width="260" height="98" rx="14" />
+      <line x1="450" y1="162" x2="668" y2="162" style="--i:0" />
+      <line x1="450" y1="178" x2="640" y2="178" style="--i:1" />
+      <line x1="450" y1="194" x2="655" y2="194" style="--i:2" />
+      <line x1="450" y1="216" x2="560" y2="216" style="--i:3" class="cc-jo-cta" />
+    </g>
+    <!-- grounding link: report → answer -->
+    <path d="M 380 150 C 405 150, 405 180, 430 180" class="cc-link" pathLength="1" />
+  </g>
+</svg>
+
+<style>
+  .cc { --T: 10s; }
+
+  .cc-card > rect { fill: #fff; stroke: var(--color-wire); stroke-width: 1.5; }
+  .cc-title { stroke: var(--color-ink); stroke-width: 6; stroke-linecap: round; }
+  .cc-sub   { stroke: var(--color-ink-muted); stroke-width: 3; stroke-linecap: round; opacity: 0.5; }
+  .cc-axis  { stroke: var(--color-wire); stroke-width: 1.5; }
+
+  .cc-bars rect {
+    fill: var(--color-pine);
+    opacity: 0.85;
+    transform-box: fill-box;
+    transform-origin: bottom;
+    animation: cc-grow var(--T) cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    animation-delay: calc(var(--i) * 0.12s);
+  }
+  @keyframes cc-grow {
+    0%, 4%    { transform: scaleY(0); }
+    16%, 90%  { transform: scaleY(1); }
+    100%      { transform: scaleY(0); }
+  }
+
+  .cc-trend {
+    fill: none; stroke: var(--color-ink); stroke-width: 1.5; stroke-linejoin: round;
+    stroke-dasharray: 1; stroke-dashoffset: 0;
+    animation: cc-draw var(--T) ease-in-out infinite;
+  }
+  @keyframes cc-draw {
+    0%, 14%  { stroke-dashoffset: 1; }
+    34%, 92% { stroke-dashoffset: 0; }
+    100%     { stroke-dashoffset: 1; }
+  }
+  .cc-dot {
+    fill: var(--color-ink);
+    animation: cc-pop var(--T) ease-out infinite;
+    animation-delay: calc(0.6s + var(--i) * 0.3s);
+  }
+  @keyframes cc-pop {
+    0%, 14%  { opacity: 0; }
+    20%, 90% { opacity: 1; }
+    95%,100% { opacity: 0; }
+  }
+
+  .cc-user rect { fill: none; stroke: var(--color-ink-muted); stroke-width: 1.5; }
+  .cc-user line { stroke: var(--color-ink-muted); stroke-width: 4; stroke-linecap: round; opacity: 0.6; }
+  .cc-user { animation: cc-fade var(--T) ease-out infinite; }
+  @keyframes cc-fade {
+    0%, 28%  { opacity: 0; transform: translateY(6px); }
+    34%, 92% { opacity: 1; transform: translateY(0); }
+    100%     { opacity: 0; }
+  }
+
+  .cc-typing rect { fill: #fff; stroke: var(--color-wire); stroke-width: 1.5; }
+  .cc-typing circle { fill: var(--color-ink-muted); animation: cc-bounce 1s ease-in-out infinite; animation-delay: calc(var(--i) * 0.15s); }
+  .cc-typing { animation: cc-typing var(--T) steps(1, end) infinite; }
+  @keyframes cc-typing {
+    0%, 38%  { opacity: 0; }
+    40%, 54% { opacity: 1; }
+    56%,100% { opacity: 0; }
+  }
+  @keyframes cc-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+  .cc-jo rect { fill: var(--color-pine); }
+  .cc-jo line { stroke: var(--color-canvas); stroke-width: 4; stroke-linecap: round; opacity: 0.85; }
+  .cc-jo-cta  { stroke-width: 5 !important; opacity: 1 !important; }
+  .cc-jo { animation: cc-jo var(--T) ease-out infinite; }
+  @keyframes cc-jo {
+    0%, 56%  { opacity: 0; transform: translateY(6px); }
+    62%, 92% { opacity: 1; transform: translateY(0); }
+    100%     { opacity: 0; }
+  }
+  .cc-jo line {
+    stroke-dasharray: 1; stroke-dashoffset: 1; pathLength: 1;
+    animation: cc-stream var(--T) ease-out infinite;
+    animation-delay: calc(var(--i) * 0.35s);
+  }
+  @keyframes cc-stream {
+    0%, 60%  { stroke-dashoffset: 1; }
+    72%, 92% { stroke-dashoffset: 0; }
+    100%     { stroke-dashoffset: 1; }
+  }
+
+  .cc-link {
+    fill: none; stroke: var(--color-pine); stroke-width: 1.5; stroke-dasharray: 3 3;
+    animation: cc-linkfade var(--T) ease-out infinite;
+  }
+  @keyframes cc-linkfade {
+    0%, 58%  { opacity: 0; }
+    64%, 92% { opacity: 0.8; }
+    100%     { opacity: 0; }
+  }
+</style>

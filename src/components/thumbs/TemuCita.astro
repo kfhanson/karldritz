@@ -1,0 +1,129 @@
+---
+// TemuCita — Cita, an AI companion for a mental-health community. A message
+// arrives; Cita retrieves from the community's vetted documents, remembers the
+// thread, and streams a reply word by word.
+interface Props { label: string }
+const { label } = Astro.props;
+---
+
+<svg viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label={label} class="tc">
+
+  <!-- Memory: the conversation thread, one node per earlier exchange -->
+  <g class="tc-memory">
+    <line x1="80" y1="46" x2="680" y2="46" />
+    {[80, 200, 320, 440, 560, 680].map((x, i) => (
+      <circle cx={x} cy="46" r="3.5" style={`--i:${i}`} />
+    ))}
+  </g>
+
+  <!-- Vetted documents the reply is grounded in -->
+  <g class="tc-docs">
+    {[0, 1, 2].map((i) => (
+      <g transform={`translate(${72 + i * 14} ${96 + i * 10})`} style={`--i:${i}`}>
+        <rect width="88" height="112" rx="6" />
+        <line x1="14" y1="24" x2="70" y2="24" />
+        <line x1="14" y1="40" x2="60" y2="40" />
+        <line x1="14" y1="56" x2="66" y2="56" />
+        <line x1="14" y1="72" x2="48" y2="72" />
+      </g>
+    ))}
+    <!-- retrieval scan -->
+    <rect class="tc-scan" x="100" y="120" width="88" height="14" rx="3" />
+  </g>
+
+  <!-- Chat -->
+  <g class="tc-chat">
+    <!-- the person -->
+    <g class="tc-user">
+      <rect x="470" y="86" width="220" height="44" rx="16" />
+      <line x1="490" y1="102" x2="660" y2="102" />
+      <line x1="490" y1="116" x2="580" y2="116" />
+    </g>
+    <!-- retrieval link -->
+    <path d="M 210 170 C 260 170, 260 196, 300 196" class="tc-link" />
+    <!-- Cita -->
+    <g class="tc-cita">
+      <rect x="300" y="152" width="300" height="104" rx="16" />
+      <circle cx="326" cy="178" r="7" class="tc-avatar" />
+      <line x1="344" y1="178" x2="570" y2="178" style="--i:0" />
+      <line x1="322" y1="200" x2="580" y2="200" style="--i:1" />
+      <line x1="322" y1="218" x2="540" y2="218" style="--i:2" />
+      <line x1="322" y1="238" x2="470" y2="238" style="--i:3" class="tc-cta" />
+    </g>
+  </g>
+</svg>
+
+<style>
+  .tc { --T: 11s; }
+
+  .tc-memory line { stroke: var(--color-wire); stroke-width: 1.5; }
+  .tc-memory circle {
+    fill: var(--color-pine);
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: tc-remember var(--T) ease-out infinite;
+    animation-delay: calc(var(--i) * 0.28s);
+  }
+  @keyframes tc-remember {
+    0%, 6%   { opacity: 0.3; transform: scale(1); }
+    10%      { opacity: 1; transform: scale(1.5); }
+    16%, 90% { opacity: 1; transform: scale(1); }
+    100%     { opacity: 0.3; }
+  }
+
+  .tc-docs rect { fill: #fff; stroke: var(--color-wire); stroke-width: 1.5; }
+  .tc-docs line { stroke: var(--color-ink-muted); stroke-width: 3; stroke-linecap: round; opacity: 0.45; }
+  .tc-scan {
+    fill: var(--color-pine) !important;
+    stroke: none !important;
+    opacity: 0;
+    animation: tc-scan var(--T) ease-in-out infinite;
+  }
+  @keyframes tc-scan {
+    0%, 30%  { opacity: 0; transform: translateY(0); }
+    34%      { opacity: 0.25; }
+    50%      { opacity: 0.25; transform: translateY(64px); }
+    54%, 100%{ opacity: 0; transform: translateY(64px); }
+  }
+
+  .tc-user rect { fill: none; stroke: var(--color-ink-muted); stroke-width: 1.5; }
+  .tc-user line { stroke: var(--color-ink-muted); stroke-width: 4; stroke-linecap: round; opacity: 0.6; }
+  .tc-user { animation: tc-fade var(--T) ease-out infinite; }
+  @keyframes tc-fade {
+    0%, 18%  { opacity: 0; transform: translateY(6px); }
+    24%, 92% { opacity: 1; transform: translateY(0); }
+    100%     { opacity: 0; }
+  }
+
+  .tc-link {
+    fill: none; stroke: var(--color-pine); stroke-width: 1.5; stroke-dasharray: 3 3;
+    animation: tc-linkfade var(--T) ease-out infinite;
+  }
+  @keyframes tc-linkfade {
+    0%, 50%  { opacity: 0; }
+    56%, 92% { opacity: 0.8; }
+    100%     { opacity: 0; }
+  }
+
+  .tc-cita rect { fill: var(--color-pine); }
+  .tc-avatar { fill: var(--color-canvas); opacity: 0.9; }
+  .tc-cita line { stroke: var(--color-canvas); stroke-width: 4; stroke-linecap: round; opacity: 0.85; }
+  .tc-cta { stroke-width: 5 !important; opacity: 1 !important; }
+  .tc-cita { animation: tc-cita var(--T) ease-out infinite; }
+  @keyframes tc-cita {
+    0%, 52%  { opacity: 0; transform: translateY(6px); }
+    58%, 92% { opacity: 1; transform: translateY(0); }
+    100%     { opacity: 0; }
+  }
+  /* streamed line by line */
+  .tc-cita line {
+    pathLength: 1; stroke-dasharray: 1; stroke-dashoffset: 1;
+    animation: tc-stream var(--T) ease-out infinite;
+    animation-delay: calc(var(--i) * 0.5s);
+  }
+  @keyframes tc-stream {
+    0%, 56%  { stroke-dashoffset: 1; }
+    70%, 92% { stroke-dashoffset: 0; }
+    100%     { stroke-dashoffset: 1; }
+  }
+</style>

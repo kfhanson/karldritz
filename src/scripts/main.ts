@@ -1,22 +1,6 @@
-import Lenis from 'lenis';
 import { initShader } from './shader';
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-// ── Lenis smooth scroll: one instance for the whole session ──
-const lenis = new Lenis({
-  duration: 1.0,
-  easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-  orientation: 'vertical',
-  gestureOrientation: 'vertical',
-  smoothWheel: !prefersReducedMotion,
-});
-
-function raf(time: number) {
-  lenis.raf(time);
-  requestAnimationFrame(raf);
-}
-requestAnimationFrame(raf);
 
 // ── Navigation scroll / dark-hero state ──
 let navCleanup: (() => void) | null = null;
@@ -43,13 +27,25 @@ function initNav() {
   navCleanup = () => window.removeEventListener('scroll', onScroll);
 }
 
-// ── Scroll-reveal fade-ups ──
+// ── Scroll-reveal: .reveal, .cascade and the About headline ──
+// All CSS transitions toggled by one class, so the compositor animates them.
+// .cascade siblings get a --d stagger so a column that enters together still
+// reads as a sequence.
 let revealObserver: IntersectionObserver | null = null;
 
 function initReveal() {
   revealObserver?.disconnect();
-  const elements = document.querySelectorAll<HTMLElement>('.reveal');
+  const elements = document.querySelectorAll<HTMLElement>('.reveal, .cascade, [data-about-title]');
   if (!elements.length) return;
+
+  const seen = new Map<Element, number>();
+  elements.forEach((el) => {
+    if (!el.classList.contains('cascade')) return;
+    const parent = el.parentElement ?? document.body;
+    const i = seen.get(parent) ?? 0;
+    seen.set(parent, i + 1);
+    el.style.setProperty('--d', `${i * 70}ms`);
+  });
 
   revealObserver = new IntersectionObserver(
     (entries) => {
@@ -65,7 +61,7 @@ function initReveal() {
   elements.forEach((el) => revealObserver!.observe(el));
 }
 
-// ── Coverflow carousel: active card expands, neighbours collapse to slats ──
+// ── Gallery accordion: active slide takes the row, the rest collapse to tabs ──
 let coverflowCleanup: (() => void) | null = null;
 
 function initCoverflow() {
@@ -80,57 +76,43 @@ function initCoverflow() {
 
   const prev = document.getElementById('cf-prev');
   const next = document.getElementById('cf-next');
-  const SIDE_W = [0, 92, 66, 46]; // widths by distance 1..3 (px)
-  const HR = [1, 0.9, 0.84, 0.78]; // height ratio (of active height) by distance 0..3
-  const GAP = 16; // px between visible cards
+  const caption = document.querySelector<HTMLElement>('[data-cf-caption]');
+  const indexEl = document.querySelector<HTMLElement>('[data-cf-index]');
+  const textEl = document.querySelector<HTMLElement>('[data-cf-text]');
+  const GAP = 12; // must match .coverflow-track gap
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const n = slides.length;
   let active = 0;
 
-  const activeWidth = () => Math.min(760, Math.max(300, el.clientWidth * 0.9));
-
   const render = (animate = true) => {
-    if (!el.clientWidth) return; // not laid out yet — the ResizeObserver re-fires
+    const W = el.clientWidth;
+    if (!W) return; // not laid out yet — the ResizeObserver re-fires
     if (!animate) el.classList.add('no-anim');
 
-    const aw = activeWidth();
-    const ah = Math.round((aw * 9) / 16); // active card is 16:9
-    el.style.height = `${ah}px`; // container follows the active card
-
-    const widths = slides.map((_, i) => {
-      const ad = Math.abs(i - active);
-      return ad === 0 ? aw : ad <= 3 ? SIDE_W[ad] : 0;
-    });
+    // Tabs share ~30% of the row, clamped so they stay legible; the active
+    // slide gets everything else.
+    const tabW = W < 640 ? 44 : Math.min(112, Math.max(56, Math.floor((W * 0.3) / Math.max(1, n - 1))));
+    const activeW = W - (n - 1) * (tabW + GAP);
+    // Row height follows a 16:9 active slide, capped so it never becomes a wall.
+    const h = Math.min(Math.round((activeW * 9) / 16), Math.round(window.innerHeight * 0.62), 620);
+    el.style.height = `${h}px`;
 
     slides.forEach((s, i) => {
-      const ad = Math.abs(i - active);
-      const visible = ad <= 3;
-      s.style.width = `${widths[i]}px`;
-      s.style.height = `${Math.round((visible ? HR[ad] : HR[3]) * ah)}px`;
-      s.style.marginLeft = s.style.marginRight = visible ? `${GAP / 2}px` : '0px';
-      s.style.opacity = visible ? '1' : '0';
-      s.style.cursor = visible && ad !== 0 ? 'pointer' : 'default';
-      s.style.pointerEvents = visible ? 'auto' : 'none';
-      // Depth shadow only on the centred card (overflow:hidden can't clip it,
-      // so on the thin slats it would bleed out).
-      s.style.boxShadow = ad === 0 ? '0 24px 55px -22px rgb(0 0 0 / 0.4)' : 'none';
-      // Only the centred card's video plays; the rest pause (poster shown).
+      const isActive = i === active;
+      s.style.width = `${isActive ? activeW : tabW}px`;
+      s.classList.toggle('is-active', isActive);
+      s.setAttribute('aria-current', isActive ? 'true' : 'false');
+      // Only the open slide's video plays; the rest pause on their poster.
       const vid = s.querySelector('video');
       if (vid) {
-        if (ad === 0 && !reduce) vid.play().catch(() => {});
+        if (isActive && !reduce) vid.play().catch(() => {});
         else vid.pause();
       }
     });
 
-    // Translate the track so the active card sits dead-centre.
-    let leftEdge = 0;
-    for (let i = 0; i < active; i++) {
-      leftEdge += widths[i] + (Math.abs(i - active) <= 3 ? GAP : 0);
-    }
-    const activeCenter = leftEdge + GAP / 2 + widths[active] / 2;
-    track.style.transform = `translateX(${el.clientWidth / 2 - activeCenter}px)`;
-
     prev?.toggleAttribute('disabled', active === 0);
-    next?.toggleAttribute('disabled', active === slides.length - 1);
+    next?.toggleAttribute('disabled', active === n - 1);
 
     if (!animate) {
       void track.offsetWidth; // flush layout before re-enabling transitions
@@ -138,21 +120,40 @@ function initCoverflow() {
     }
   };
 
-  const go = (n: number) => {
-    active = Math.max(0, Math.min(slides.length - 1, n));
+  const setCaption = () => {
+    if (indexEl) indexEl.textContent = `${pad2(active + 1)} / ${pad2(n)}`;
+    if (textEl) textEl.textContent = slides[active].dataset.caption ?? '';
+  };
+  let captionTimer: ReturnType<typeof setTimeout> | undefined;
+  const swapCaption = () => {
+    if (!caption || reduce) return setCaption();
+    caption.classList.add('is-swapping');
+    clearTimeout(captionTimer);
+    captionTimer = setTimeout(() => {
+      setCaption();
+      caption.classList.remove('is-swapping');
+    }, 220);
+  };
+
+  const go = (i: number) => {
+    const target = Math.max(0, Math.min(n - 1, i));
+    if (target === active) return;
+    active = target;
     render();
+    swapCaption();
   };
 
   render(false); // first paint: snap into place, no animation
+  setCaption();
 
-  if (slides.length > 1) {
+  if (n > 1) {
     slides.forEach((s, i) => s.addEventListener('click', () => i !== active && go(i)));
     prev?.addEventListener('click', () => go(active - 1));
     next?.addEventListener('click', () => go(active + 1));
 
     el.setAttribute('tabindex', '0');
     el.setAttribute('role', 'group');
-    el.setAttribute('aria-label', 'Project image carousel — use arrow keys');
+    el.setAttribute('aria-label', 'Project gallery — use arrow keys');
     el.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft') { e.preventDefault(); go(active - 1); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); go(active + 1); }
@@ -169,11 +170,30 @@ function initCoverflow() {
     });
   }
 
-  // Re-render whenever the carousel gets or changes width. This also covers the
-  // case where it has no width yet at init (intermittent "blank until refresh").
+  // Re-render whenever the row gets or changes width (also covers the case
+  // where it has no width yet at init).
   const ro = new ResizeObserver(() => render(false));
   ro.observe(el);
-  coverflowCleanup = () => ro.disconnect();
+
+  // Only decode video while the gallery is actually on screen. Without this the
+  // active clip keeps playing (1080p, 60fps) the whole time the reader is
+  // scrolling through the case study below it.
+  const io = new IntersectionObserver(
+    ([entry]) => {
+      const vid = slides[active].querySelector('video');
+      if (!vid) return;
+      if (entry.isIntersecting && !reduce) vid.play().catch(() => {});
+      else vid.pause();
+    },
+    { threshold: 0.15 }
+  );
+  io.observe(el);
+
+  coverflowCleanup = () => {
+    ro.disconnect();
+    io.disconnect();
+    clearTimeout(captionTimer);
+  };
 }
 
 // ── Grid hover videos: play while the card is hovered, reset on leave ──
@@ -193,6 +213,81 @@ function initGridHoverVideos() {
   });
 }
 
+// ── About: experience timeline ──
+// The spine fills to a "reading line" ~70% down the viewport; nodes light once
+// that line passes them and stay lit. One rAF-throttled scroll listener.
+let timelineCleanup: (() => void) | null = null;
+
+function initTimeline() {
+  timelineCleanup?.();
+  timelineCleanup = null;
+
+  const tl = document.querySelector<HTMLElement>('[data-timeline]');
+  if (!tl) return;
+  const spine = tl.querySelector<HTMLElement>('.tl-spine');
+  const items = Array.from(tl.querySelectorAll<HTMLElement>('.tl-item'));
+  if (!spine || !items.length) return;
+
+  if (prefersReducedMotion) {
+    tl.style.setProperty('--tl-progress', '1');
+    items.forEach((it) => it.classList.add('is-lit'));
+    return;
+  }
+
+  const nodes = items.map((it) => it.querySelector<HTMLElement>('.tl-node')!);
+  let progress = 0;
+  let raf = 0;
+
+  const update = () => {
+    raf = 0;
+    const line = window.innerHeight * 0.7;
+    const r = spine.getBoundingClientRect();
+    // Monotonic: the line never retreats, so lit nodes stay consistent with it.
+    progress = Math.max(progress, Math.min(1, Math.max(0, (line - r.top) / r.height)));
+    tl.style.setProperty('--tl-progress', progress.toFixed(4));
+    nodes.forEach((n, i) => {
+      const b = n.getBoundingClientRect();
+      if (b.top + b.height / 2 <= line) items[i].classList.add('is-lit');
+    });
+  };
+  const schedule = () => {
+    if (!raf) raf = requestAnimationFrame(update);
+  };
+
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule);
+  update();
+
+  timelineCleanup = () => {
+    window.removeEventListener('scroll', schedule);
+    window.removeEventListener('resize', schedule);
+    cancelAnimationFrame(raf);
+  };
+}
+
+// ── Animated SVG thumbnails: run only while on screen ──
+// CSS keeps every animation inside [data-anim-thumb] paused until data-playing
+// is set, so off-screen cards cost nothing.
+let thumbObserver: IntersectionObserver | null = null;
+
+function initAnimatedThumbs() {
+  thumbObserver?.disconnect();
+  const thumbs = document.querySelectorAll<HTMLElement>('[data-anim-thumb]');
+  if (!thumbs.length) return;
+
+  thumbObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        (entry.target as HTMLElement).dataset.playing = entry.isIntersecting ? 'true' : 'false';
+      }
+    },
+    // Play only when a good chunk of the card is actually visible, so at most
+    // one or two thumbs animate at a time.
+    { threshold: 0.3 }
+  );
+  thumbs.forEach((el) => thumbObserver!.observe(el));
+}
+
 // ── Hero shader ──
 let shaderCleanup: (() => void) | null = null;
 
@@ -204,24 +299,11 @@ function initHeroShader() {
 }
 
 // ── View-transition lifecycle ──
-// Lenis vs. scroll reset. Lenis drives scroll from a rAF loop with a cached
-//    position. On navigation Astro resets scroll to the top, but Lenis keeps
-//    writing the OLD page's offset every frame — the two fight while the
-//    cross-fade paints, which reads as a stutter/jump. So freeze Lenis (and
-//    stop the shader's rAF, which otherwise contends for the main thread during
-//    the snapshot) before the swap, then resync Lenis to the new page and resume.
+// Stop the shader's rAF before the swap so it doesn't contend for the main
+// thread while the cross-fade paints.
 document.addEventListener('astro:before-swap', () => {
-  lenis.stop();
   shaderCleanup?.();
   shaderCleanup = null;
-});
-
-document.addEventListener('astro:after-swap', () => {
-  // Jump Lenis's internal state to the freshly-reset scroll position so it
-  // doesn't lerp back toward the previous page's offset.
-  lenis.scrollTo(0, { immediate: true, force: true });
-  lenis.resize();
-  lenis.start();
 });
 
 // astro:page-load fires on initial load and after every view transition.
@@ -231,4 +313,6 @@ document.addEventListener('astro:page-load', () => {
   initHeroShader();
   initCoverflow();
   initGridHoverVideos();
+  initAnimatedThumbs();
+  initTimeline();
 });
