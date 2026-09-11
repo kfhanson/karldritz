@@ -9,12 +9,21 @@ const projects = defineCollection({
     // A media item is either an image (bare path) or a video. Videos live under
     // public/ — `src`/`webm` are paths like 'videos/demo.mp4'; `poster` is an
     // imported image shown while paused / under reduced-motion.
+    // Optional per-item presentation: `caption` is shown under the gallery and
+    // on the collapsed tab; `fit` overrides object-fit (portraits and slides
+    // usually want 'contain').
+    const presentation = {
+      caption: z.string().optional(),
+      fit: z.enum(['cover', 'contain']).optional(),
+    };
     const media = z.union([
       image(),
+      z.object({ image: image(), ...presentation }),
       z.object({
         src: z.string(),
         webm: z.string().optional(),
         poster: image().optional(),
+        ...presentation,
       }),
     ]);
 
