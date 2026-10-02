@@ -1,4 +1,5 @@
 import { initShader } from './shader';
+import { initEasterEgg } from './egg';
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -305,6 +306,9 @@ document.addEventListener('astro:before-swap', () => {
   shaderCleanup?.();
   shaderCleanup = null;
 });
+
+// Document-level listener: survives view transitions, so it's bound once.
+initEasterEgg();
 
 // astro:page-load fires on initial load and after every view transition.
 document.addEventListener('astro:page-load', () => {
