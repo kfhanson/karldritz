@@ -3,7 +3,7 @@
 // styles travel inside it for the same reason.
 import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
-import { Game, VIEW_W, type Action, type Hud } from './game';
+import { Game, VIEW_H, VIEW_W, type Action, type Hud } from './game';
 
 const KEYS: Record<string, Action> = {
   ArrowLeft: 'left',
@@ -60,8 +60,8 @@ const TEMPLATE = `
 
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
-          <h3>Survive the rifts.</h3>
-          <p class="ea-copy">Monsters pour out of the ceiling, round after round. Every fifth round, something bigger comes through.</p>
+          <h3>Clear the office.</h3>
+          <p class="ea-copy">Bugs ride the elevators in, floor after floor. Take the stairs, aim with the mouse, and keep the building clean. Every fifth round, something bigger arrives.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
             <button type="button" data-exit>Back to portfolio <span>Esc</span></button>
@@ -90,10 +90,11 @@ const TEMPLATE = `
       </div>
 
       <p class="ea-help">
-        <span><kbd>←</kbd><kbd>→</kbd> move</span>
-        <span><kbd>↑</kbd> / <kbd>Space</kbd> jump</span>
-        <span><kbd>↓</kbd> + jump drop down</span>
-        <span><kbd>X</kbd> / <kbd>J</kbd> shoot</span>
+        <span><kbd>A</kbd><kbd>D</kbd> move</span>
+        <span><kbd>W</kbd> / <kbd>Space</kbd> jump</span>
+        <span>Mouse aim</span>
+        <span>Click shoot</span>
+        <span><kbd>S</kbd> + jump step off stairs</span>
         <span><kbd>P</kbd> pause</span>
       </p>
 
@@ -265,11 +266,40 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('keyup', onKey, true);
 
+  // ── Mouse: aim at the cursor, hold the button to fire ──
+  let mouseFiring = false;
+  const toGame = (e: PointerEvent) => {
+    const r = canvas.getBoundingClientRect();
+    game.setAim(((e.clientX - r.left) / r.width) * VIEW_W, ((e.clientY - r.top) / r.height) * VIEW_H);
+  };
+  const onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    game.setAimMode('mouse');
+    toGame(e);
+  };
+  frame.addEventListener('pointermove', onPointerMove);
+  frame.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0 || game.mode !== 'play') return;
+    e.preventDefault();
+    game.setAimMode('mouse');
+    toGame(e);
+    mouseFiring = true;
+    game.press('fire');
+  });
+  const onPointerUp = () => {
+    if (!mouseFiring) return;
+    mouseFiring = false;
+    game.release('fire');
+  };
+  window.addEventListener('pointerup', onPointerUp);
+  frame.addEventListener('contextmenu', (e) => game.mode === 'play' && e.preventDefault());
+
   // ── Touch ──
   root.querySelectorAll<HTMLElement>('[data-hold]').forEach((btn) => {
     const a = btn.dataset.hold as Action;
     const on = (e: PointerEvent) => {
       e.preventDefault();
+      game.setAimMode('auto'); // no cursor on a touchscreen: shots seek the nearest bug
       btn.setPointerCapture?.(e.pointerId);
       btn.classList.add('is-down');
       game.press(a);
@@ -314,6 +344,7 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
           window.removeEventListener('keydown', onKey, true);
           window.removeEventListener('keyup', onKey, true);
           window.removeEventListener('blur', onBlur);
+          window.removeEventListener('pointerup', onPointerUp);
           document.removeEventListener('visibilitychange', onVis);
           // The body may have been swapped by a navigation while we were up.
           document.body.inert = document.body === body ? wasInert : false;
