@@ -5,7 +5,7 @@
 const STREAK_GAP = 700; // ms between clicks that still counts as spamming
 const CRACK_FROM = 3; // click that draws the first crack
 const SHATTER_AT = 7; // click that breaks the glass
-const HEAL_AFTER = 1600; // ms of no clicks before the cracks fade
+const HEAL_AFTER = 3000; // ms of no clicks before the cracks start to heal
 
 type Glass = typeof import('./glass');
 
@@ -33,8 +33,9 @@ function onClick(e: MouseEvent) {
 
   // The event's own timestamp, not "now": if the main thread is busy for a
   // moment, queued clicks still count as the streak they were.
+  // Once the glass shows a crack, the streak lives as long as the crack does.
   const now = e.timeStamp;
-  streak = now - lastClick < STREAK_GAP ? streak + 1 : 1;
+  streak = impact || now - lastClick < STREAK_GAP ? streak + 1 : 1;
   lastClick = now;
 
   // A single click is still just the home link. Once it turns into a streak,
@@ -75,10 +76,13 @@ function onClick(e: MouseEvent) {
   }
 
   loadGlass().then((g) => g.crack(hit, at));
-  healTimer = setTimeout(() => {
-    streak = 0;
-    impact = null;
-    glass?.then((g) => g.heal());
+  healTimer = setTimeout(async () => {
+    const g = await loadGlass();
+    // A hit while it mends picks the streak back up; only a full heal ends it.
+    if (await g.heal()) {
+      streak = 0;
+      impact = null;
+    }
   }, HEAL_AFTER);
 }
 
