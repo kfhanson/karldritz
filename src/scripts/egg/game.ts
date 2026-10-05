@@ -1,6 +1,7 @@
 // Bug Hunt — survival in a three-storey office. Bugs ride the elevators in,
-// round after round; each round is bigger, every fifth has a boss. Hallways
-// are joined by stairwells, and the player aims with the mouse.
+// round after round; each round is bigger, every fifth has a boss. A stair
+// core at each end of the building joins the floors, and the player aims with
+// the mouse.
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
@@ -9,8 +10,8 @@ export const VIEW_W = 320;
 export const VIEW_H = 184;
 const T = 8; // tile size
 
-// Cross-section of the building. '#' is wall or floor slab; the gaps in the
-// slabs are stairwells.
+// Cross-section of the building. '#' is wall or floor slab. The slabs stop
+// short of both ends: those are the stair shafts.
 const MAP = [
   '########################################',
   '#......................................#',
@@ -19,14 +20,14 @@ const MAP = [
   '#......................................#',
   '#......................................#',
   '#......................................#',
-  '####################.....###############',
+  '#.......########################.......#',
   '#......................................#',
   '#......................................#',
   '#......................................#',
   '#......................................#',
   '#......................................#',
   '#......................................#',
-  '##########.....##########.....##########',
+  '#.......########################.......#',
   '#......................................#',
   '#......................................#',
   '#......................................#',
@@ -42,28 +43,47 @@ const ROWS = MAP.length;
 // Walking surface of each storey, top floor first.
 const FLOORS = [56, 112, 176];
 
-// Stair flights: (x0, y0) is the foot, (x1, y1) the head. Bodies walk onto a
-// flight from its foot or drop onto it through the stairwell, and pass under
-// it otherwise.
+// Stairs, as one-way slopes: (x0, y0) is the foot, (x1, y1) the head. Bodies
+// land on them from above and pass under them otherwise. Flat ones are the
+// half-landings.
 interface Ramp {
   x0: number;
   y0: number;
   x1: number;
   y1: number;
 }
-const RAMPS: Ramp[] = [
-  { x0: 40, y0: 176, x1: 120, y1: 112 },
-  { x0: 280, y0: 176, x1: 200, y1: 112 },
-  { x0: 130, y0: 112, x1: 200, y1: 56 },
-];
 
-// Elevator doors, by centre x and storey.
-const LIFTS = [
-  { x: 32, floor: 0 },
-  { x: 288, floor: 0 },
-  { x: 32, floor: 1 },
-  { x: 288, floor: 1 },
-];
+// Each end of the building has a stair core: switchback flights with a
+// half-landing against the outer wall, opening onto every floor through a
+// doorway at the shaft's inner edge.
+const SHAFT = 56; // shaft width
+const DOOR_L = 8 + SHAFT; // x of the left shaft's doorway
+const DOOR_R = VIEW_W - 8 - SHAFT;
+function stairCore(side: 1 | -1): Ramp[] {
+  const door = side > 0 ? DOOR_L : DOOR_R; // where flights meet each floor
+  const turn = door - side * 40; // where they meet the landing
+  const wall = side > 0 ? 8 : VIEW_W - 8;
+  const flights: Ramp[] = [];
+  for (let f = FLOORS.length - 1; f > 0; f--) {
+    const low = FLOORS[f];
+    const high = FLOORS[f - 1];
+    const mid = (low + high) / 2;
+    flights.push({ x0: door, y0: low, x1: turn, y1: mid }); // up to the landing
+    flights.push({ x0: wall, y0: mid, x1: turn, y1: mid }); // the landing
+    flights.push({ x0: turn, y0: mid, x1: door, y1: high }); // on up to the next floor
+  }
+  return flights;
+}
+const RAMPS: Ramp[] = [...stairCore(1), ...stairCore(-1)];
+const isLanding = (r: Ramp) => r.y0 === r.y1;
+
+// Elevator doors in the central core, two on every floor.
+const CORE_L = 132;
+const CORE_R = 188;
+const LIFTS = FLOORS.flatMap((_, floor) => [
+  { x: 146, floor },
+  { x: 174, floor },
+]);
 
 const STEP = 1 / 60;
 const MAX_HP = 5;
@@ -77,6 +97,12 @@ const GLASS = '#E2E7E5';
 const SKYLINE = '#CDD4D0';
 const MULLION = '#9C9B94';
 const STEEL = '#BDBBB3';
+const CONCRETE = '#E7E5DF';
+const CONCRETE_LINE = '#DDDAD3';
+const PANEL = '#EEECE6';
+const PANEL_SEAM = '#E2E0D9';
+const EXIT = '#2F8F5B';
+const SERVERS = [CORE_R + 8, CORE_R + 22];
 const STEEL_HI = '#D6D4CD';
 const LIGHT = '#FFF4D6';
 
@@ -92,6 +118,7 @@ interface Body {
   ground: boolean;
   wall: boolean;
   ramp: Ramp | null;
+  climb?: number; // at a fork in the stairs: +1 take the way up, -1 the way down
 }
 
 interface Player extends Body {
@@ -168,7 +195,7 @@ export interface Hooks {
   over(result: { score: number; round: number; best: number; record: boolean }): void;
 }
 
-export type Action = 'left' | 'right' | 'up' | 'down' | 'fire';
+export type Action = 'left' | 'right' | 'up' | 'down' | 'jump' | 'fire';
 
 /** How the player aims: at the mouse, along their facing, or at the nearest bug (touch). */
 export type AimMode = 'mouse' | 'facing' | 'auto';
@@ -276,7 +303,7 @@ export class Game {
     this.deadT = 0;
     this.held.clear();
     this.player = {
-      x: 157, y: 176 - 11, w: 6, h: 11, vx: 0, vy: 0, ground: false, wall: false, ramp: null,
+      x: 104, y: 176 - 11, w: 6, h: 11, vx: 0, vy: 0, ground: false, wall: false, ramp: null, climb: 1,
       face: 1, hp: MAX_HP, inv: 0, coyote: 0, buffer: 0, cool: 0, drop: 0, rapid: 0, anim: 0, dead: false,
     };
     this.mode = 'play';
@@ -310,7 +337,7 @@ export class Game {
   }
 
   press(a: Action) {
-    if (a === 'up' && !this.held.has('up')) this.jumpPressed = true;
+    if (a === 'jump' && !this.held.has('jump')) this.jumpPressed = true;
     this.held.add(a);
   }
 
@@ -536,6 +563,13 @@ export class Game {
       p.vx = Math.abs(p.vx) <= f ? 0 : p.vx - Math.sign(p.vx) * f;
     }
     p.vx = Math.max(-RUN, Math.min(RUN, p.vx));
+    // W / S choose the way at a fork in the stairs; otherwise keep going the
+    // way you were.
+    if (h.has('up')) p.climb = 1;
+    else if (h.has('down')) p.climb = -1;
+    else if (p.ramp && !isLanding(p.ramp) && Math.abs(p.vx) > 8) {
+      p.climb = Math.sign(p.ramp.x1 - p.ramp.x0) === Math.sign(p.vx) ? 1 : -1;
+    }
     const aim = this.aimDir(p);
     if (this.aimMode !== 'facing' && Math.abs(aim.x) > 0.05) p.face = aim.x < 0 ? -1 : 1;
 
@@ -543,7 +577,7 @@ export class Game {
     p.buffer = this.jumpPressed ? 0.11 : p.buffer - dt;
     if (p.buffer > 0 && p.coyote > 0) {
       if (h.has('down') && p.ramp) {
-        p.drop = 0.25; // step off the side of the stairs
+        p.drop = 0.25; // hop off the side of the stairs
       } else {
         p.vy = -JUMP;
         this.dust(p.x + p.w / 2, p.y + p.h, 4);
@@ -553,7 +587,7 @@ export class Game {
       p.coyote = 0;
     }
     // Short hop when the button is let go early; heavier on the way down.
-    const g = p.vy < 0 && h.has('up') ? 980 : 1700;
+    const g = p.vy < 0 && h.has('jump') ? 980 : 1700;
     p.vy = Math.min(330, p.vy + g * dt);
     p.drop -= dt;
 
@@ -629,12 +663,24 @@ export class Game {
     b.x += b.vx * dt;
     const r0 = Math.floor(b.y / T);
     const r1 = Math.floor((b.y + b.h - 0.01) / T);
-    if (b.vx > 0) {
-      const c = Math.floor((b.x + b.w - 0.01) / T);
-      for (let r = r0; r <= r1; r++) if (tile(c, r) === '#') (b.x = c * T - b.w), (b.vx = 0), (b.wall = true);
-    } else if (b.vx < 0) {
-      const c = Math.floor(b.x / T);
-      for (let r = r0; r <= r1; r++) if (tile(c, r) === '#') (b.x = (c + 1) * T), (b.vx = 0), (b.wall = true);
+    if (b.vx !== 0) {
+      const c = b.vx > 0 ? Math.floor((b.x + b.w - 0.01) / T) : Math.floor(b.x / T);
+      let blocked = false;
+      for (let r = r0; r <= r1; r++) if (tile(c, r) === '#') blocked = true;
+      if (blocked) {
+        // A lip of a few pixels (where a flight meets a floor) is stepped up
+        // onto rather than walked into.
+        const top = r1 * T;
+        let clear = true;
+        for (let r = r0; r < r1; r++) if (tile(c, r) === '#') clear = false;
+        if (clear && tile(c, r1 - 1) !== '#' && b.y + b.h - top <= 5) {
+          b.y = top - b.h;
+        } else {
+          b.x = b.vx > 0 ? c * T - b.w : (c + 1) * T;
+          b.vx = 0;
+          b.wall = true;
+        }
+      }
     }
 
     const prevBottom = b.y + b.h;
@@ -656,24 +702,38 @@ export class Game {
       for (let c = c0; c <= c1; c++) if (tile(c, r) === '#') (b.y = (r + 1) * T), (b.vy = 0);
     }
 
-    // Stairs act like a one-way slope: land on them from above, walk onto
-    // them from the foot, and stick to them walking down.
+    // Stairs: land on them from above, walk onto them from the foot, stick to
+    // them on the way down. Where a landing meets two flights, take the one
+    // going the way the body wants (climb), and keep to the flight you're on.
     const was = b.ramp;
     b.ramp = null;
     if (!stairs || b.vy < 0) return;
     const cx = b.x + b.w / 2;
+    const dir = Math.sign(b.vx);
+    const want = b.climb ?? 0;
+    let pick: Ramp | null = null;
+    let best = -Infinity;
     for (const r of RAMPS) {
       const [lo, hi] = rampSpan(r);
       if (cx < lo || cx > hi) continue;
       const sy = rampY(r, cx);
-      const bottom = b.y + b.h;
-      if (prevBottom <= sy + 3 && bottom >= sy - (was === r ? 5 : 0)) {
-        b.y = sy - b.h;
-        b.vy = 0;
-        b.ground = true;
-        b.ramp = r;
-        return;
-      }
+      if (prevBottom > sy + 3 || b.y + b.h < sy - (was === r ? 5 : 0)) continue;
+      const up = !isLanding(r) && dir !== 0 && Math.sign(r.x1 - r.x0) === dir;
+      // Stepping onto the stairs from a floor, ignore a flight going the wrong
+      // way: the way down starts just below the doorway, the way up level
+      // with it, so the body drops the few pixels onto the right one.
+      if (!was && !isLanding(r) && want < 0 && up) continue;
+      let score = r === was ? 1 : 0;
+      const ahead = cx + dir * 3;
+      if (dir && (ahead < lo || ahead > hi)) score -= 4; // about to run off its end
+      if (!isLanding(r) && dir) score += (up ? want : -want) * 2;
+      if (score > best) [best, pick] = [score, r];
+    }
+    if (pick) {
+      b.y = rampY(pick, cx) - b.h;
+      b.vy = 0;
+      b.ground = true;
+      b.ramp = pick;
     }
   }
 
@@ -709,36 +769,29 @@ export class Game {
       return;
     }
 
-    // Walkers: chase on the same floor, otherwise head for the stairs that
-    // lead toward the target. Bosses are too big for the stairwells.
+    // Walkers: chase on the same floor; otherwise make for the nearer stair
+    // core's doorway and take its flights the right way. A landing ends at the
+    // outer wall, and bouncing off it turns them onto the next flight.
+    // Bosses are too big for the stairs.
     if (e.ground) {
       const mine = floorOf(e.y + e.h);
       const theirs = floorOf(tgt.feet);
       const dx = tgt.x - cx;
+      // Compare heights, not floor numbers: a landing sits between floors.
+      const rise = e.y + e.h - tgt.feet;
+      e.climb = rise > 20 ? 1 : rise < -20 ? -1 : 0;
       if (e.ramp) {
-        if (Math.abs(tgt.y - cy) < 20 && Math.abs(dx) > 6) e.dir = dx < 0 ? -1 : 1;
+        if (Math.abs(tgt.y - cy) < 16 && Math.abs(dx) > 6) e.dir = dx < 0 ? -1 : 1;
       } else if (theirs === mine || e.kind === 'boss') {
         if (Math.abs(dx) > 6) e.dir = dx < 0 ? -1 : 1;
-      } else {
-        const up = theirs < mine;
-        let best: Ramp | null = null;
-        let bestD = Infinity;
-        for (const r of RAMPS) {
-          const entry = up ? r.x0 : r.x1;
-          if (floorOf(up ? r.y0 : r.y1) !== mine) continue;
-          const d = Math.abs(entry - cx);
-          if (d < bestD) [best, bestD] = [r, d];
-        }
-        if (best) {
-          const entry = up ? best.x0 : best.x1;
-          if (Math.abs(entry - cx) > 3) e.dir = entry < cx ? -1 : 1;
-          else e.dir = (up ? best.x1 - best.x0 : best.x0 - best.x1) < 0 ? -1 : 1;
-        }
+      } else if (cx > DOOR_L && cx < DOOR_R) {
+        const door = Math.abs(cx - DOOR_L) <= Math.abs(cx - DOOR_R) ? DOOR_L : DOOR_R;
+        e.dir = door < cx ? -1 : 1; // into the shaft
       }
       e.hop -= dt;
       if (e.kind === 'crawler' && e.hop <= 0) {
         e.hop = rand(1.2, 2.4);
-        if (theirs === mine && Math.abs(dx) < 50 && Math.random() < 0.5) e.vy = -180;
+        if (theirs === mine && !e.ramp && Math.abs(dx) < 50 && Math.random() < 0.5) e.vy = -180;
       }
     }
     const want = e.dir * e.speed;
@@ -881,6 +934,9 @@ export class Game {
   }
 
   // ── Drawing: the building ──
+  // Section through a three-storey office: stair cores at both ends, a lift
+  // core in the middle, glazed offices between. Top to bottom: a meeting room
+  // and a server corner, open-plan desks, the lobby.
   private paintOffice(): HTMLCanvasElement {
     const c = document.createElement('canvas');
     c.width = VIEW_W;
@@ -900,38 +956,65 @@ export class Game {
       x += w;
     }
 
-    px(0, 0, VIEW_W, VIEW_H, WALL);
-    const storeys = [
-      { top: 8, floor: 56 },
-      { top: 64, floor: 112 },
-      { top: 120, floor: 176 },
+    const storeys = FLOORS.map((floor, i) => ({ top: i === 0 ? 8 : FLOORS[i - 1] + 8, floor }));
+    const offices = [
+      [DOOR_L, CORE_L],
+      [CORE_R, DOOR_R],
     ];
-    storeys.forEach(({ top, floor }, si) => {
-      const wy = top + 6;
-      const wh = floor - top - 15;
-      // Floor-to-ceiling-ish glazing between the elevator lobbies.
-      px(52, wy, 216, wh, GLASS);
-      for (let x = 52; x < 268; x++) {
-        const h = Math.round(skyline[x] * (0.55 + si * 0.25));
-        px(x, wy + wh - h, 1, h, SKYLINE);
-        if (x % 3 === 0 && h > 6 && (x * 7 + si) % 5 === 0) px(x, wy + wh - h + 3, 1, 1, WALL); // lit windows
-      }
-      for (let k = 0; k < 9; k++) {
-        const x0 = 58 + k * 24 + (si * 7) % 11;
-        for (let d = 0; d < 8; d++) if (x0 + d < 266) px(x0 + d, wy + 2 + d * 2, 1, 2, 'rgba(255,255,255,0.55)'); // reflections
-      }
-      for (let x = 52; x <= 268; x += 24) px(x, wy, 1, wh, MULLION);
-      px(52, wy, 217, 1, MULLION);
-      px(52, wy + wh, 217, 1, MULLION);
-      px(52, wy + wh + 1, 217, 1, PAL.w); // sill
 
-      // Ceiling lights.
-      for (let x = 20; x < 300; x += 40) {
-        px(x, top, 12, 1, LIGHT);
-        px(x - 2, top + 1, 16, 1, 'rgba(255,244,214,0.5)');
+    px(0, 0, VIEW_W, VIEW_H, WALL);
+
+    // Stair shafts: bare concrete, a shade darker than the offices.
+    for (const [x0, x1] of [[8, DOOR_L], [DOOR_R, VIEW_W - 8]]) {
+      px(x0, 8, x1 - x0, FLOORS[2] - 8, CONCRETE);
+      for (let y = 14; y < FLOORS[2]; y += 12) px(x0, y, x1 - x0, 1, CONCRETE_LINE); // block coursing
+    }
+
+    // Lift core: a panelled wall.
+    storeys.forEach(({ top, floor }) => {
+      px(CORE_L, top, CORE_R - CORE_L, floor - top, PANEL);
+      for (let x = CORE_L + 7; x < CORE_R; x += 14) px(x, top, 1, floor - top, PANEL_SEAM);
+    });
+
+    storeys.forEach(({ top, floor }, si) => {
+      const lobby = si === 2;
+      // Glazing along each office.
+      for (const [a, b] of offices) {
+        const x0 = a + 4;
+        const x1 = b - 4;
+        const wy = top + 6;
+        const wh = floor - top - (lobby ? 10 : 15);
+        px(x0, wy, x1 - x0, wh, GLASS);
+        for (let x = x0; x < x1; x++) {
+          const h = Math.round(skyline[x] * (0.55 + si * 0.25));
+          px(x, wy + wh - h, 1, h, SKYLINE);
+          if (x % 3 === 0 && h > 6 && (x * 7 + si) % 5 === 0) px(x, wy + wh - h + 3, 1, 1, WALL); // lit windows
+        }
+        for (let x = x0 + 6 + (si * 5) % 9; x < x1 - 6; x += 22) {
+          for (let d = 0; d < 7; d++) px(x + d, wy + 2 + d * 2, 1, 2, 'rgba(255,255,255,0.55)'); // reflections
+        }
+        for (let x = x0; x <= x1; x += 16) px(Math.min(x, x1), wy, 1, wh, MULLION);
+        px(x0, wy, x1 - x0 + 1, 1, MULLION);
+        px(x0, wy + wh, x1 - x0 + 1, 1, MULLION);
+        px(x0, wy + wh + 1, x1 - x0 + 1, 1, PAL.w); // sill
+        // Ceiling lights.
+        for (let x = a + 8; x < b - 10; x += 26) {
+          px(x, top, 12, 1, LIGHT);
+          px(x - 2, top + 1, 16, 1, 'rgba(255,244,214,0.5)');
+        }
+        px(a, floor - 2, b - a, 1, PAL.w); // skirting
       }
-      // Skirting.
-      px(8, floor - 2, 304, 1, PAL.w);
+
+      // Shaft doorways: a wall down to the door head, a frame, an exit sign.
+      for (const [door, side] of [[DOOR_L, 1], [DOOR_R, -1]] as const) {
+        const head = floor - 27;
+        px(door - 1, top, 2, head - top, PAL.m);
+        px(door - 3, head, 6, 1, PAL.m);
+        const sx = side > 0 ? door + 3 : door - 12;
+        px(sx, head - 7, 9, 4, EXIT);
+        px(sx + 2, head - 6, 5, 1, WALL);
+        px(side > 0 ? sx + 6 : sx + 2, head - 5, 1, 1, WALL); // arrow tip
+      }
     });
 
     // Slabs and walls.
@@ -943,19 +1026,7 @@ export class Game {
       }
     }
 
-    // Furniture: desks with monitors, chairs, plants. Kept clear of the stairs
-    // and the lifts so the play space reads cleanly.
-    const desk = (x: number, f: number) => {
-      px(x, f - 7, 16, 1, PAL.k); // top
-      px(x + 1, f - 6, 1, 6, PAL.m);
-      px(x + 14, f - 6, 1, 6, PAL.m);
-      px(x + 5, f - 12, 6, 4, PAL.k); // monitor
-      px(x + 6, f - 11, 4, 2, PAL.g);
-      px(x + 7, f - 8, 2, 1, PAL.k);
-      px(x + 18, f - 6, 3, 1, PAL.m); // chair
-      px(x + 20, f - 10, 1, 4, PAL.m);
-      px(x + 19, f - 2, 1, 2, PAL.m);
-    };
+    // ── Furniture ──
     const plant = (x: number, f: number) => {
       px(x, f - 4, 5, 4, PAL.k);
       px(x + 1, f - 9, 1, 5, PAL.g);
@@ -964,19 +1035,96 @@ export class Game {
       px(x + 4, f - 7, 1, 2, PAL.l);
       px(x + 2, f - 11, 1, 2, PAL.l);
     };
-    desk(60, 56);
-    desk(232, 56);
-    plant(150, 56);
-    desk(248, 112);
-    plant(60, 112);
-    plant(302, 112);
-    desk(130, 176);
-    plant(14, 176);
-    plant(301, 176);
+    const chair = (x: number, f: number, face: number) => {
+      px(x, f - 6, 4, 1, PAL.m); // seat
+      px(face > 0 ? x : x + 3, f - 11, 1, 5, PAL.m); // back
+      px(x + 1, f - 5, 1, 3, PAL.m);
+      px(x, f - 2, 4, 1, PAL.m); // base
+    };
+    const desk = (x: number, f: number) => {
+      px(x, f - 8, 18, 1, PAL.k); // top
+      px(x + 1, f - 7, 1, 7, PAL.m);
+      px(x + 16, f - 7, 1, 7, PAL.m);
+      px(x + 2, f - 7, 6, 4, PAL.m); // drawers
+      px(x + 9, f - 14, 7, 5, PAL.k); // monitor
+      px(x + 10, f - 13, 5, 3, PAL.g);
+      px(x + 12, f - 9, 1, 1, PAL.k);
+      px(x + 3, f - 9, 3, 1, PAL.m); // keyboard
+      chair(x + 20, f, -1);
+    };
 
-    // Stairs: a solid stepped stringer under the walking line, with a handrail.
+    // Top floor: a glass-walled meeting room, and the server corner.
+    {
+      const { top, floor: f } = storeys[0];
+      const x0 = DOOR_L + 6;
+      const x1 = CORE_L - 6;
+      px(x0, top + 8, x1 - x0, f - top - 8, 'rgba(226,231,229,0.55)');
+      px(x0, top + 8, x1 - x0, 1, MULLION);
+      px(x0, top + 8, 1, f - top - 8, MULLION);
+      px(x1 - 1, top + 8, 1, f - top - 8, MULLION);
+      px(x0 + 16, top + 8, 1, f - top - 8, 'rgba(156,155,148,0.6)');
+      px(x0 + 20, top + 13, 22, 11, PAL.k); // wall screen
+      px(x0 + 21, top + 14, 20, 9, PAL.g);
+      px(x0 + 23, top + 20, 3, 2, PAL.l); // a chart on it
+      px(x0 + 27, top + 18, 3, 4, PAL.l);
+      px(x0 + 31, top + 16, 3, 6, PAL.l);
+      px(x0 + 12, f - 9, 32, 1, PAL.k); // table
+      px(x0 + 14, f - 8, 1, 8, PAL.m);
+      px(x0 + 41, f - 8, 1, 8, PAL.m);
+      chair(x0 + 6, f, 1);
+      chair(x0 + 46, f, -1);
+      // Server racks, LEDs drawn live.
+      for (const rx of SERVERS) {
+        px(rx, f - 30, 12, 30, PAL.k);
+        for (let y = f - 28; y < f - 2; y += 3) px(rx + 1, y, 10, 1, '#2A2A27');
+      }
+      plant(DOOR_R - 12, f);
+    }
+
+    // Middle floor: open-plan desks.
+    {
+      const f = storeys[1].floor;
+      desk(DOOR_L + 6, f);
+      desk(DOOR_L + 36, f);
+      desk(CORE_R + 6, f);
+      desk(CORE_R + 36, f);
+    }
+
+    // Ground floor: the lobby.
+    {
+      const { top, floor: f } = storeys[2];
+      const rx = DOOR_L + 10;
+      px(rx, f - 12, 44, 12, PAL.k); // reception counter
+      px(rx, f - 12, 44, 1, '#3A3A36');
+      px(rx + 2, f - 8, 40, 2, PAL.g);
+      px(rx + 16, f - 17, 7, 5, PAL.k); // monitor
+      px(rx + 17, f - 16, 5, 3, PAL.g);
+      px(rx + 18, top + 12, 8, 8, PAL.g); // the company mark on the wall
+      px(rx + 20, top + 14, 4, 4, WALL);
+      px(rx + 21, top + 15, 2, 2, PAL.g);
+      plant(rx + 48, f);
+      const sx = CORE_R + 8;
+      px(sx, f - 9, 32, 7, PAL.k); // sofa
+      px(sx + 2, f - 8, 13, 3, PAL.l);
+      px(sx + 17, f - 8, 13, 3, PAL.l);
+      px(sx, f - 13, 3, 11, PAL.k);
+      px(sx + 29, f - 13, 3, 11, PAL.k);
+      px(sx + 1, f - 2, 1, 2, PAL.k);
+      px(sx + 30, f - 2, 1, 2, PAL.k);
+      px(sx + 36, f - 5, 12, 1, PAL.k); // coffee table
+      px(sx + 37, f - 4, 1, 4, PAL.m);
+      px(sx + 46, f - 4, 1, 4, PAL.m);
+      plant(DOOR_R - 9, f);
+    }
+
+    // ── Stairs ──
     for (const r of RAMPS) {
       const [lo, hi] = rampSpan(r);
+      if (isLanding(r)) {
+        px(lo, r.y0, hi - lo, 4, PAL.k); // the half-landing slab
+        px(lo, r.y0, hi - lo, 1, '#3A3A36');
+        continue;
+      }
       const rising = r.x1 > r.x0;
       for (let x = lo; x < hi; x++) {
         const k = Math.floor((x - lo) / 5);
@@ -984,18 +1132,18 @@ export class Game {
         const under = Math.round(rampY(r, rising ? x : x + 1)) + 4;
         px(x, tread, 1, Math.max(1, under - tread), PAL.k);
         px(x, tread, 1, 1, '#3A3A36');
-        px(x, Math.round(rampY(r, x)) - 10, 1, 1, PAL.m); // rail
-        if ((x - lo) % 16 === 4) px(x, Math.round(rampY(r, x)) - 9, 1, 8, PAL.w);
+        px(x, Math.round(rampY(r, x)) - 10, 1, 1, PAL.m); // handrail
+        if ((x - lo) % 13 === 6) px(x, Math.round(rampY(r, x)) - 9, 1, 8, PAL.w);
       }
     }
 
-    // Lift frames, call lights and floor numbers.
+    // Lift frames, and the floor number between each pair of doors.
     for (const l of LIFTS) {
       const f = FLOORS[l.floor];
       px(l.x - 10, f - 28, 20, 28, PAL.m);
       px(l.x - 9, f - 27, 18, 27, PAL.k);
-      drawText(g, String(3 - l.floor), l.x + 14, f - 26, PAL.m);
     }
+    FLOORS.forEach((f, i) => drawText(g, String(3 - i), (CORE_L + CORE_R) / 2, f - 24, PAL.m));
     return c;
   }
 
@@ -1018,6 +1166,15 @@ export class Game {
       c.fillStyle = coming ? PAL.r : l.queue ? PAL.k : PAL.g;
       c.fillRect(l.x - 1, f - 31, 3, 2);
     }
+    // Server LEDs, flickering.
+    const f = FLOORS[0];
+    SERVERS.forEach((rx, k) => {
+      for (let i = 0; i < 8; i++) {
+        const on = Math.sin(this.time * (3 + i * 1.7) + k * 5 + i) > 0.2;
+        c.fillStyle = on ? (i % 4 === 0 ? PAL.r : '#7FD39A') : '#2A2A27';
+        c.fillRect(rx + 9, f - 27 + i * 3, 1, 1);
+      }
+    });
   }
 
   private draw(s: Sprite, x: number, y: number, face: number, flash = false, scale = 1) {

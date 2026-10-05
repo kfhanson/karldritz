@@ -432,6 +432,20 @@
     visibility: hidden;
   }
 }
+@media (pointer: coarse) and (max-width: 440px) {
+  .ea-touch {
+    gap: 0.5rem;
+  }
+  .ea-touch div {
+    gap: 0.35rem;
+  }
+  .ea-touch button {
+    min-width: 2.75rem;
+    height: 2.9rem;
+    padding: 0 0.55rem;
+    font-size: 0.7rem;
+  }
+}
 
 @media (max-width: 640px) {
   .ea-hud div:nth-child(3) {

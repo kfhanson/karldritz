@@ -12,8 +12,8 @@ const KEYS: Record<string, Action> = {
   KeyD: 'right',
   ArrowUp: 'up',
   KeyW: 'up',
-  Space: 'up',
-  KeyZ: 'up',
+  Space: 'jump',
+  KeyZ: 'jump',
   ArrowDown: 'down',
   KeyS: 'down',
   KeyX: 'fire',
@@ -61,7 +61,7 @@ const TEMPLATE = `
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
           <h3>Clear the office.</h3>
-          <p class="ea-copy">Bugs ride the elevators in, floor after floor. Take the stairs, aim with the mouse, and keep the building clean. Every fifth round, something bigger arrives.</p>
+          <p class="ea-copy">Bugs ride the elevators in, floor after floor. Use the stairwells at either end, aim with the mouse, and keep the building clean. Every fifth round, something bigger arrives.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
             <button type="button" data-exit>Back to portfolio <span>Esc</span></button>
@@ -91,10 +91,10 @@ const TEMPLATE = `
 
       <p class="ea-help">
         <span><kbd>A</kbd><kbd>D</kbd> move</span>
-        <span><kbd>W</kbd> / <kbd>Space</kbd> jump</span>
+        <span><kbd>Space</kbd> jump</span>
+        <span><kbd>W</kbd><kbd>S</kbd> stairs up / down</span>
         <span>Mouse aim</span>
         <span>Click shoot</span>
-        <span><kbd>S</kbd> + jump step off stairs</span>
         <span><kbd>P</kbd> pause</span>
       </p>
 
@@ -102,11 +102,12 @@ const TEMPLATE = `
         <div>
           <button type="button" data-hold="left">◀</button>
           <button type="button" data-hold="right">▶</button>
+          <button type="button" data-hold="up">▲</button>
           <button type="button" data-hold="down">▼</button>
         </div>
         <div>
           <button type="button" data-hold="fire">Fire</button>
-          <button type="button" data-hold="up">Jump</button>
+          <button type="button" data-hold="jump">Jump</button>
         </div>
       </div>
     </div>
