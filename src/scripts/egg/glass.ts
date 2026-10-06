@@ -611,7 +611,7 @@ export async function shatter(at: Pt): Promise<void> {
   const shards = scene ? [] : cut(snap, sx);
   if (scene) scene.rest();
   wipe(ctx!);
-  const arcade = openArcade({ fade: false });
+  const arcade = openArcade({ fade: false, impact: web!.o });
   burst(0.9, 3000, 0.5);
   for (let k = 0; k < 6; k++) tone(rand(2200, 4200), rand(1800, 3000), 0.12, 0.04, 'sine', 0.05 + k * 0.07);
   if (scene) {

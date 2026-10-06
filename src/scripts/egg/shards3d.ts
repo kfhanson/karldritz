@@ -122,7 +122,7 @@ function clipToView(poly: Pt[], w: number, h: number): Pt[] {
   return out;
 }
 
-function compile(gl: WebGLRenderingContext, type: number, src: string) {
+export function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const s = gl.createShader(type)!;
   gl.shaderSource(s, src);
   gl.compileShader(s);
@@ -131,7 +131,7 @@ function compile(gl: WebGLRenderingContext, type: number, src: string) {
 }
 
 /** Column-major 4×4 helpers. */
-function perspective(fov: number, aspect: number, near: number, far: number) {
+export function perspective(fov: number, aspect: number, near: number, far: number) {
   const f = 1 / Math.tan(fov / 2);
   const nf = 1 / (near - far);
   return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);

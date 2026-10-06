@@ -4,6 +4,7 @@
 import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
 import { Game, VIEW_H, VIEW_W, type Action, type Hud } from './game';
+import { createShardMenu, type ShardMenu } from './shardmenu';
 
 const KEYS: Record<string, Action> = {
   ArrowLeft: 'left',
@@ -60,11 +61,27 @@ const TEMPLATE = `
 
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
-          <h3>Clear the office.</h3>
-          <p class="ea-copy">Bugs ride the elevators in, floor after floor. Use the stairwells at either end, aim with the mouse, and keep the building clean. Every fifth round, something bigger arrives.</p>
+          <h3>Hold the floor.</h3>
+          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
+            <button type="button" data-help>How to play</button>
             <button type="button" data-exit>Back to portfolio <span>Esc</span></button>
+          </div>
+        </section>
+
+        <section class="ea-screen" data-screen="help" hidden>
+          <p class="ea-eyebrow">How to play</p>
+          <h3>Survive the rounds.</h3>
+          <ul class="ea-keys">
+            <li><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> move</li>
+            <li><span>Mouse</span> aim, click to shoot</li>
+            <li><span><kbd>Space</kbd></span> dash, untouchable for a moment</li>
+            <li><span>Pickups</span> hearts heal, bolts fire faster</li>
+            <li><span>Combos</span> quick kills multiply score, up to ×5</li>
+          </ul>
+          <div class="ea-menu">
+            <button type="button" data-back>Back <span>Esc</span></button>
           </div>
         </section>
 
@@ -90,11 +107,10 @@ const TEMPLATE = `
       </div>
 
       <p class="ea-help">
-        <span><kbd>A</kbd><kbd>D</kbd> move</span>
-        <span><kbd>Space</kbd> jump</span>
-        <span><kbd>W</kbd><kbd>S</kbd> stairs up / down</span>
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
         <span>Mouse aim</span>
         <span>Click shoot</span>
+        <span><kbd>Space</kbd> dash</span>
         <span><kbd>P</kbd> pause</span>
       </p>
 
@@ -107,7 +123,7 @@ const TEMPLATE = `
         </div>
         <div>
           <button type="button" data-hold="fire">Fire</button>
-          <button type="button" data-hold="jump">Jump</button>
+          <button type="button" data-hold="jump">Dash</button>
         </div>
       </div>
     </div>
@@ -120,7 +136,7 @@ export interface Arcade {
   destroy(fade: boolean): Promise<void>;
 }
 
-export function openArcade({ fade }: { fade: boolean }): Arcade {
+export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: number; y: number } }): Arcade {
   const root = document.createElement('div');
   root.className = 'egg-arcade';
   root.setAttribute('role', 'dialog');
@@ -197,6 +213,54 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
     root.classList.toggle('is-rapid', h.rapid);
   }
 
+  // ── The start menu: glass shards when the browser can draw them ──
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let shards: ShardMenu | null = null;
+  if (!fade && !reduce) {
+    shards = createShardMenu(
+      root,
+      [
+        { id: 'start', label: 'Start game', hint: 'Enter' },
+        { id: 'help', label: 'How to play' },
+        { id: 'exit', label: 'Back to portfolio', hint: 'Esc' },
+      ],
+      () => frame.getBoundingClientRect(),
+      (id) => choose(id),
+    );
+  }
+  // The real buttons stay underneath, invisible, for the keyboard and screen
+  // readers; focusing one lights up its shard.
+  root.classList.toggle('has-shards', !!shards);
+  const menuScreen = $('[data-screen="menu"]');
+  menuScreen.addEventListener('focusin', (e) => {
+    const b = (e.target as Element).closest('button');
+    shards?.focus(b?.hasAttribute('data-start') ? 'start' : b?.hasAttribute('data-help') ? 'help' : b?.hasAttribute('data-exit') ? 'exit' : null);
+  });
+  menuScreen.addEventListener('focusout', () => shards?.focus(null));
+
+  const openMenu = (from?: { x: number; y: number }) => {
+    show('menu');
+    shards?.show(from);
+  };
+
+  let choosing = false;
+  async function choose(id: string) {
+    if (choosing || leaving) return;
+    choosing = true;
+    try {
+      if (id === 'help') {
+        if (shards?.visible) await shards.hide();
+        show('help');
+      } else {
+        if (shards?.visible) await shards.pick(id);
+        if (id === 'start') start();
+        else leave();
+      }
+    } finally {
+      choosing = false;
+    }
+  }
+
   const start = () => {
     show(null);
     root.classList.add('is-playing');
@@ -205,7 +269,7 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
   const toMenu = () => {
     game.attract();
     root.classList.remove('is-playing');
-    show('menu');
+    openMenu();
   };
   const pause = () => {
     if (game.mode !== 'play') return;
@@ -234,10 +298,12 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
   root.addEventListener('click', (e) => {
     const t = (e.target as Element).closest('button');
     if (!t) return;
-    if (t.hasAttribute('data-start')) start();
+    if (t.hasAttribute('data-start')) game.mode === 'attract' ? choose('start') : start();
+    else if (t.hasAttribute('data-help')) choose('help');
+    else if (t.hasAttribute('data-back')) openMenu();
     else if (t.hasAttribute('data-resume')) resume();
     else if (t.hasAttribute('data-menu')) toMenu();
-    else if (t.hasAttribute('data-exit')) leave();
+    else if (t.hasAttribute('data-exit')) choose('exit');
     else if (t.hasAttribute('data-mute')) (setMuted(!isMuted()), syncMute());
   });
 
@@ -257,11 +323,18 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
     if (!down) return;
     if (e.code === 'KeyM') return void (setMuted(!isMuted()), syncMute());
     if (game.mode === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), resume());
-    if (e.code === 'Escape') return void (e.preventDefault(), leave());
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      const help = screens.find((x) => x.dataset.screen === 'help');
+      return void (help && !help.hidden ? openMenu() : choose('exit'));
+    }
     // Enter starts from the menu or game-over screen unless a button has focus
     // (then the button's own action runs).
     if (e.code === 'Enter' && (game.mode === 'attract' || game.mode === 'over')) {
-      if (!(document.activeElement instanceof HTMLButtonElement)) (e.preventDefault(), start());
+      if (!(document.activeElement instanceof HTMLButtonElement)) {
+        e.preventDefault();
+        game.mode === 'attract' ? choose('start') : start();
+      }
     }
   };
   window.addEventListener('keydown', onKey, true);
@@ -331,7 +404,7 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
 
   requestAnimationFrame(() => {
     root.classList.add('is-in');
-    show('menu');
+    openMenu(impact);
   });
 
   return {
@@ -339,6 +412,7 @@ export function openArcade({ fade }: { fade: boolean }): Arcade {
     destroy: (fadeOut) =>
       new Promise<void>((resolve) => {
         const done = () => {
+          shards?.destroy();
           game.destroy();
           ro.disconnect();
           clearTimeout(bannerTimer);
