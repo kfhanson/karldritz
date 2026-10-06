@@ -4,7 +4,7 @@
 import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
 import { Game, VIEW_H, VIEW_W, type Action, type Hud } from './game';
-import { createShardMenu, type ShardMenu } from './shardmenu';
+import { createShardMenu, type ShardMenu, type ShardSource } from './shardmenu';
 
 const KEYS: Record<string, Action> = {
   ArrowLeft: 'left',
@@ -133,10 +133,12 @@ const TEMPLATE = `
 export interface Arcade {
   /** Resolves when the player asks to leave. */
   exit: Promise<void>;
+  /** Send the menu's shards back to their places in the page. */
+  reassemble(): Promise<void>;
   destroy(fade: boolean): Promise<void>;
 }
 
-export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: number; y: number } }): Arcade {
+export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?: ShardSource }): Arcade {
   const root = document.createElement('div');
   root.className = 'egg-arcade';
   root.setAttribute('role', 'dialog');
@@ -225,7 +227,9 @@ export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: numb
         { id: 'exit', label: 'Back to portfolio', hint: 'Esc' },
       ],
       () => frame.getBoundingClientRect(),
+      { canvas, rect: () => canvas.getBoundingClientRect() },
       (id) => choose(id),
+      shardSource,
     );
   }
   // The real buttons stay underneath, invisible, for the keyboard and screen
@@ -238,9 +242,9 @@ export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: numb
   });
   menuScreen.addEventListener('focusout', () => shards?.focus(null));
 
-  const openMenu = (from?: { x: number; y: number }) => {
+  const openMenu = () => {
     show('menu');
-    shards?.show(from);
+    shards?.show();
   };
 
   let choosing = false;
@@ -251,10 +255,11 @@ export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: numb
       if (id === 'help') {
         if (shards?.visible) await shards.hide();
         show('help');
-      } else {
+      } else if (id === 'start') {
         if (shards?.visible) await shards.pick(id);
-        if (id === 'start') start();
-        else leave();
+        start();
+      } else {
+        leave(); // the shards fly home as the page reassembles
       }
     } finally {
       choosing = false;
@@ -402,13 +407,14 @@ export function openArcade({ fade, impact }: { fade: boolean; impact?: { x: numb
   });
   ro.observe(frame);
 
-  requestAnimationFrame(() => {
-    root.classList.add('is-in');
-    openMenu(impact);
-  });
+  // The shards must be in place on the very frame the page breaks, so the
+  // menu opens now; the rest of the arcade rises in on the next frame.
+  openMenu();
+  requestAnimationFrame(() => root.classList.add('is-in'));
 
   return {
     exit,
+    reassemble: () => shards?.home() ?? Promise.resolve(),
     destroy: (fadeOut) =>
       new Promise<void>((resolve) => {
         const done = () => {

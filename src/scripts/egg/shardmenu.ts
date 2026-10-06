@@ -1,9 +1,11 @@
-// The start menu: shards of the broken page that never fell. Each is a slab
-// of frosted glass with its label etched in, hanging in 3D over the arcade.
-// They lean toward the cursor, catch the light, and burst when chosen.
+// The start menu: three real shards of the broken page. As the page falls
+// they peel out of the burst still showing it, flip once, and turn to clear
+// glass with their label lettered on, hanging over the arcade. Through them
+// you see the game behind, bent by the glass. They lean toward the cursor,
+// burst when chosen, and on the way out fly home so the page reassembles.
 //
-// Every shard is built from wedge fragments that tile it exactly, so at rest
-// it's one piece and on a click the same geometry flies apart.
+// Every shard is built from wedge fragments that tile it exactly, so the same
+// geometry can fly apart; at rest it's drawn in one piece.
 import { burst, tone } from './audio';
 import { compile, perspective } from './shards3d';
 
@@ -15,81 +17,134 @@ export interface MenuItem {
   hint?: string;
 }
 
+/** Where the shards came from: their outlines on screen and the page they showed. */
+export interface ShardSource {
+  polys: Pt[][];
+  snap: HTMLCanvasElement;
+}
+
+/** What's behind the glass: the game canvas and where it sits. */
+export interface Backdrop {
+  canvas: HTMLCanvasElement;
+  rect: () => DOMRect;
+}
+
 export interface ShardMenu {
   readonly visible: boolean;
-  /** Fly the shards in, from a point on screen (the impact) or from below. */
-  show(from?: Pt): void;
+  /** Fly in: out of the page (first time) or up from below. */
+  show(): void;
   /** Burst the chosen shard and send the rest away. */
   pick(id: string): Promise<void>;
   /** Send them all away without a choice (e.g. for the help card). */
   hide(): Promise<void>;
+  /** Fly back to where they were in the page, turning back into it. */
+  home(): Promise<void>;
   /** Mirror keyboard focus from the real buttons underneath. */
   focus(id: string | null): void;
   destroy(): void;
 }
 
-const THICKNESS = 4;
+const THICKNESS = 5;
 const FOV = (35 * Math.PI) / 180;
 const GRAVITY = 1400;
+const FLOATS = 12; // per vertex
 
 const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
-attribute vec2 aUv;
+attribute vec2 aUvPage;
+attribute vec2 aUvLabel;
 attribute float aKind;
+attribute float aEdge;
 uniform mat4 uProj;
 uniform mat4 uModel;
-varying vec2 vUv;
+varying vec2 vUvPage;
+varying vec2 vUvLabel;
 varying vec3 vNormal;
 varying vec3 vPos;
 varying float vKind;
+varying float vEdge;
 void main() {
   vec4 world = uModel * vec4(aPos, 1.0);
   vPos = world.xyz;
   vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
-  vUv = aUv;
+  vUvPage = aUvPage;
+  vUvLabel = aUvLabel;
   vKind = aKind;
+  vEdge = aEdge;
   gl_Position = uProj * world;
 }`;
 
-// Premultiplied colour throughout. A shadow pass reuses the same geometry.
+// Clear glass: refract what's behind (offset by the tilt and pulled inward at
+// the bevelled rim, a little apart per channel), tint it faintly green, darken
+// the thick rim, add a Fresnel sheen and highlights, then the lettering.
+// uMix crossfades from the page the shard was cut from (0) to glass (1).
 const FRAG = `
 precision mediump float;
-uniform sampler2D uTex;
+uniform sampler2D uPage;
+uniform sampler2D uLabel;
+uniform sampler2D uBack;
+uniform vec2 uRes;
+uniform vec2 uCenter;
 uniform vec3 uLight;
 uniform vec3 uEye;
+uniform float uMix;
 uniform float uGlow;
 uniform float uAlpha;
 uniform float uShadow;
-varying vec2 vUv;
+varying vec2 vUvPage;
+varying vec2 vUvLabel;
 varying vec3 vNormal;
 varying vec3 vPos;
 varying float vKind;
+varying float vEdge;
 void main() {
   if (uShadow > 0.5) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.14 * uAlpha);
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.07 * uAlpha * uMix);
     return;
   }
   vec3 n = normalize(vNormal);
   vec3 v = normalize(uEye - vPos);
   if (dot(n, v) < 0.0) n = -n;
   vec3 l = normalize(uLight);
-  float diffuse = max(dot(n, l), 0.0);
-  float spec = pow(max(dot(n, normalize(l + v)), 0.0), 36.0);
-  vec4 c;
-  if (vKind < 0.5) {
-    c = texture2D(uTex, vUv);
-    c.rgb += uGlow * c.a;
-  } else if (vKind < 1.5) {
-    c = texture2D(uTex, vUv) * 0.82;
+  vec3 h = normalize(l + v);
+  float ndv = max(dot(n, v), 0.0);
+  float nh = max(dot(n, h), 0.0);
+  float spec = pow(nh, 90.0) * 1.1 + pow(nh, 12.0) * 0.1;
+  float fresnel = pow(1.0 - ndv, 3.0);
+
+  vec2 suv = vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y);
+  float rim = 1.0 - smoothstep(0.0, 0.16, vEdge);
+  vec2 bend = n.xy * vec2(0.05, -0.05) - (suv - uCenter) * rim * 0.09;
+  vec3 seen = vec3(
+    texture2D(uBack, suv + bend * 1.08).r,
+    texture2D(uBack, suv + bend).g,
+    texture2D(uBack, suv + bend * 0.92).b
+  );
+
+  vec3 glass;
+  if (vKind > 1.5) {
+    // The cut edge: thick, green, catching the light.
+    glass = seen * vec3(0.58, 0.72, 0.68) + spec * 0.8 + 0.06;
   } else {
-    c = vec4(vec3(0.70, 0.79, 0.76) * (0.6 + 0.4 * diffuse), 1.0);
+    glass = seen * vec3(0.94, 0.975, 0.962);
+    glass *= 1.0 - rim * 0.28;
+    glass += (1.0 - smoothstep(0.0, 0.03, vEdge)) * 0.35; // the bright lip of the edge
+    glass += fresnel * 0.35 + spec;
+    vec4 ink = texture2D(uLabel, vUvLabel);
+    glass = glass * (1.0 - ink.a) + ink.rgb;
+    glass += uGlow;
   }
-  c.rgb += spec * 0.55 * c.a;
-  gl_FragColor = c * uAlpha;
+  vec3 page = texture2D(uPage, vUvPage).rgb;
+  if (vKind > 1.5) page = page * 0.7;
+  vec3 color = mix(page, glass, uMix);
+  gl_FragColor = vec4(color, 1.0) * uAlpha;
 }`;
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+const smooth = (p: number) => p * p * (3 - 2 * p);
+const easeInOut = (p: number) => 0.5 - Math.cos(Math.PI * p) / 2;
 
 // ── Column-major 4×4 ──
 type M4 = Float32Array;
@@ -111,7 +166,7 @@ const translate = (x: number, y: number, z: number): M4 => {
   m[14] = z;
   return m;
 };
-const scale = (s: number): M4 => {
+const scaleM = (s: number): M4 => {
   const m = ident();
   m[0] = m[5] = m[10] = s;
   return m;
@@ -137,7 +192,48 @@ function axisAngle(x: number, y: number, z: number, a: number): M4 {
   ]);
 }
 
-/** A broken-glass outline around a w×h label: ragged edges, pointed ends. */
+function areaOf(p: Pt[]) {
+  let s = 0;
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i];
+    const b = p[(i + 1) % p.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s / 2;
+}
+
+function centroid(p: Pt[]): Pt {
+  const a = areaOf(p) || 1;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[i];
+    const r = p[(i + 1) % p.length];
+    const k = q.x * r.y - r.x * q.y;
+    cx += (q.x + r.x) * k;
+    cy += (q.y + r.y) * k;
+  }
+  return { x: cx / (6 * a), y: cy / (6 * a) };
+}
+
+const turn = (p: Pt, a: number): Pt => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) });
+
+/** The rotation that lays a shard's long axis flat, and its size that way. */
+function lieFlat(world: Pt[]) {
+  let best = { a: 0, w: 1, h: 1, ratio: 0 };
+  for (let k = 0; k < 72; k++) {
+    const a = (k / 72) * Math.PI;
+    const r = world.map((p) => turn(p, a));
+    const xs = r.map((p) => p.x);
+    const ys = r.map((p) => p.y);
+    const w = Math.max(...xs) - Math.min(...xs);
+    const h = Math.max(...ys) - Math.min(...ys);
+    if (w / h > best.ratio) best = { a, w, h, ratio: w / h };
+  }
+  return best;
+}
+
+/** A broken-glass outline around a w×h label, for when there's no page to cut from. */
 function outline(w: number, h: number): Pt[] {
   const hw = w / 2;
   const hh = h / 2;
@@ -153,12 +249,14 @@ function outline(w: number, h: number): Pt[] {
   ];
 }
 
-interface Frag {
+interface Range {
   first: number;
   count: number;
-  cx: number; // centroid, shard-local
+}
+
+interface Frag extends Range {
+  cx: number;
   cy: number;
-  // Burst motion, relative to the shard.
   x: number;
   y: number;
   z: number;
@@ -172,22 +270,27 @@ interface Frag {
   spin: number;
 }
 
+type Pose = { x: number; y: number; z: number; rx: number; ry: number; rz: number; s: number; mix: number };
+
 interface Shard {
   item: MenuItem;
-  poly: Pt[];
-  whole: { first: number; count: number }; // the unbroken slab
-
-  w: number;
-  h: number;
-  tex: WebGLTexture;
+  local: Pt[]; // outline in world units around the centroid, y up
+  whole: Range;
   frags: Frag[];
-  // Pose now, and where it's heading. World units: CSS px, origin mid-screen, y up.
-  cur: { x: number; y: number; z: number; rx: number; ry: number; rz: number; s: number };
-  tgt: { x: number; y: number; z: number; rx: number; ry: number; rz: number; s: number };
+  label: WebGLTexture;
+  rest: Pose; // where it was in the page
+  flat: number; // rotation that lays it level as a button
+  size: number; // scale that makes it button-sized
+  hw: number; // half extents as a button, CSS px
+  hh: number;
+  cur: Pose;
+  from: Pose; // for scripted flights
+  t: number; // flight progress
+  dur: number;
   delay: number;
-  state: 'hidden' | 'in' | 'idle' | 'out' | 'burst';
+  state: 'hidden' | 'rest' | 'peel' | 'idle' | 'out' | 'burst' | 'home';
   alpha: number;
-  hover: number; // 0..1, eased
+  hover: number;
   seed: number;
 }
 
@@ -195,7 +298,9 @@ export function createShardMenu(
   host: HTMLElement,
   items: MenuItem[],
   anchor: () => DOMRect,
+  backdrop: Backdrop,
   onPick: (id: string) => void,
+  source?: ShardSource,
 ): ShardMenu | null {
   const canvas = document.createElement('canvas');
   canvas.className = 'ea-shards';
@@ -209,7 +314,7 @@ export function createShardMenu(
     gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERT));
     gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAG));
     gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'link');
   } catch (err) {
     console.warn('[egg] shard menu unavailable', err);
     return null;
@@ -222,16 +327,30 @@ export function createShardMenu(
   const uGlow = u('uGlow');
   const uAlpha = u('uAlpha');
   const uShadow = u('uShadow');
+  const uMix = u('uMix');
+  const uCenter = u('uCenter');
   gl.uniform3f(u('uLight'), -0.45, 0.65, 1);
-  gl.uniform1i(u('uTex'), 0);
+  gl.uniform1i(u('uPage'), 0);
+  gl.uniform1i(u('uLabel'), 1);
+  gl.uniform1i(u('uBack'), 2);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
 
-  // ── Sizes follow the game frame ──
+  const makeTex = (unit: number) => {
+    const t = gl.createTexture()!;
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+
+  // ── Viewport, camera ──
   let W = 0;
   let H = 0;
-  let D = 0;
+  let projM = ident();
   const size = () => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = innerWidth;
@@ -239,176 +358,194 @@ export function createShardMenu(
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     gl.viewport(0, 0, canvas.width, canvas.height);
-    D = H / 2 / Math.tan(FOV / 2);
+    const D = H / 2 / Math.tan(FOV / 2);
     const proj = perspective(FOV, W / H, 10, D * 4);
     proj[14] += proj[10] * -D; // camera at z = D looking down -z
     proj[15] += proj[11] * -D;
     gl.uniformMatrix4fv(u('uProj'), false, proj);
     gl.uniform3f(u('uEye'), 0, 0, D);
+    gl.uniform2f(u('uRes'), canvas.width, canvas.height);
     projM = proj;
   };
-  let projM = ident();
   size();
 
-  const frame0 = anchor();
-  const shardW = Math.max(150, Math.min(300, frame0.width * 0.5));
-  const touch = window.matchMedia('(pointer: coarse)').matches; // no keyboard hints there
-  const shardH = Math.round(shardW * 0.23);
+  // ── Textures: the page (unit 0), each label (unit 1), the backdrop (unit 2) ──
+  makeTex(0);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  if (source) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.snap);
+  else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 245, 241, 255]));
+  const backTex = makeTex(2);
+  const back = document.createElement('canvas');
+  const backCtx = back.getContext('2d')!;
 
-  // ── Geometry: every fragment of every shard in one buffer ──
+  // The backdrop: the arcade's paper, with the live game where the frame is.
+  const paintBackdrop = () => {
+    const k = 0.75;
+    const bw = Math.round(W * k);
+    const bh = Math.round(H * k);
+    if (back.width !== bw || back.height !== bh) {
+      back.width = bw;
+      back.height = bh;
+    }
+    backCtx.fillStyle = '#F6F5F1';
+    backCtx.fillRect(0, 0, bw, bh);
+    const r = backdrop.rect();
+    backCtx.imageSmoothingEnabled = false;
+    backCtx.drawImage(backdrop.canvas, r.left * k, r.top * k, r.width * k, r.height * k);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, backTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, back);
+  };
+
+  // ── Geometry ──
+  const frame0 = anchor();
+  const btnW = Math.max(150, Math.min(290, frame0.width * 0.48));
+  const btnH = Math.round(btnW * 0.24);
+  const touch = window.matchMedia('(pointer: coarse)').matches; // no keyboard hints there
+
   const data: number[] = [];
-  const push = (x: number, y: number, z: number, nx: number, ny: number, nz: number, uu: number, vv: number, k: number) =>
-    data.push(x, y, z, nx, ny, nz, uu, vv, k);
+  const push = (p: Pt, z: number, nx: number, ny: number, nz: number, pu: number, pv: number, lu: number, lv: number, kind: number, edge: number) =>
+    data.push(p.x, p.y, z, nx, ny, nz, pu, pv, lu, lv, kind, edge);
 
   const shards: Shard[] = items.map((item, i) => {
-    const w = shardW - i * 14;
-    const h = shardH;
-    const poly = outline(w, h);
-    const xs = poly.map((p) => p.x);
-    const ys = poly.map((p) => p.y);
-    const bx = Math.min(...xs) - 2;
-    const by = Math.min(...ys) - 2;
-    const bw = Math.max(...xs) + 2 - bx;
-    const bh = Math.max(...ys) + 2 - by;
-    const uv = (p: Pt) => [(p.x - bx) / bw, (p.y - by) / bh];
-
-    // Wedges from the centre, each edge split once more at a random point.
-    const frags: Frag[] = [];
-    const tri = (a: Pt, b: Pt) => {
-      const first = data.length / 9;
-      // Shard space is y-down like the screen; flip to world (y-up) here.
-      const P = (p: Pt) => [p.x, -p.y];
-      const o = { x: 0, y: 0 };
-      // Drawn without a depth buffer, so in painter's order: back, edges, face.
-      const face = (z: number, nz: number, kind: number) => {
-        for (const p of [o, a, b]) {
-          const [x, y] = P(p);
-          const [uu, vv] = uv(p);
-          push(x, y, z, 0, 0, nz, uu, vv, kind);
-        }
-      };
-      face(-THICKNESS, -1, 1);
-      // Its outer edge, plus the two inner ones (only seen when it flies apart).
-      for (const [p, q] of [[a, b], [o, a], [b, o]] as const) {
-        const [x1, y1] = P(p);
-        const [x2, y2] = P(q);
-        const l = Math.hypot(x2 - x1, y2 - y1) || 1;
-        const nx = (y2 - y1) / l;
-        const ny = -(x2 - x1) / l;
-        push(x1, y1, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, -THICKNESS, nx, ny, 0, 0, 0, 2);
-        push(x1, y1, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, -THICKNESS, nx, ny, 0, 0, 0, 2);
-        push(x1, y1, -THICKNESS, nx, ny, 0, 0, 0, 2);
-      }
-      face(0, 1, 0);
-      const cx = (a.x + b.x) / 3;
-      const cy = -(a.y + b.y) / 3;
-      frags.push({ first, count: data.length / 9 - first, cx, cy, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, ax: 0, ay: 0, az: 1, angle: 0, spin: 0 });
+    // Outline: a real cut from the page, or a made-up one.
+    const screen = source?.polys[i];
+    let local: Pt[];
+    let rest: Pose;
+    if (screen) {
+      const c = centroid(screen);
+      local = screen.map((p) => ({ x: p.x - c.x, y: -(p.y - c.y) }));
+      rest = { x: c.x - W / 2, y: H / 2 - c.y, z: 0, rx: 0, ry: 0, rz: 0, s: 1, mix: 0 };
+    } else {
+      local = outline(btnW, btnH).map((p) => ({ x: p.x, y: -p.y }));
+      rest = { x: 0, y: -H, z: 0, rx: 0, ry: 0, rz: 0, s: 1, mix: 1 };
+    }
+    if (areaOf(local) < 0) local.reverse();
+    const lay = lieFlat(local);
+    const flat = lay.a; // world rotation that levels it (turn() is the same rotation)
+    const size = Math.min(btnW / lay.w, (btnH * 1.35) / lay.h);
+    const level = local.map((p) => turn(p, lay.a)); // as it hangs, before scaling
+    const xs = level.map((p) => p.x);
+    const ys = level.map((p) => p.y);
+    const bx0 = Math.min(...xs);
+    const by1 = Math.max(...ys);
+    const lw = Math.max(...xs) - bx0;
+    const lh = by1 - Math.min(...ys);
+    const labelUv = (p: Pt) => {
+      const q = turn(p, lay.a);
+      return [(q.x - bx0) / lw, (by1 - q.y) / lh];
     };
-    poly.forEach((a, k) => {
-      const b = poly[(k + 1) % poly.length];
-      const t = rand(0.35, 0.65);
-      const m = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-      tri(a, m);
-      tri(m, b);
-    });
+    const pageUv = (p: Pt) => [(rest.x + p.x + W / 2) / W, (H / 2 - (rest.y + p.y)) / H];
 
-    // The same slab in one piece, without the fragments' inner edges (which
-    // would show as seams once it tilts).
-    const wholeFirst = data.length / 9;
-    {
-      const P = (p: Pt) => [p.x, -p.y];
-      const n = poly.length;
+    // Slab pieces. Fans from the centroid: aEdge is 1 there and 0 on the rim.
+    const o = { x: 0, y: 0 };
+    const slab = (tris: [Pt, Pt][], rimOnly: boolean): Range => {
+      const first = data.length / FLOATS;
       const face = (z: number, nz: number, kind: number) => {
-        for (let k = 0; k < n; k++) {
-          for (const p of [{ x: 0, y: 0 }, poly[k], poly[(k + 1) % n]]) {
-            const [x, y] = P(p);
-            const [uu, vv] = uv(p);
-            push(x, y, z, 0, 0, nz, uu, vv, kind);
+        for (const [a, b] of tris) {
+          for (const [p, e] of [[o, 1], [a, 0], [b, 0]] as const) {
+            const [pu, pv] = pageUv(p);
+            const [lu, lv] = labelUv(p);
+            push(p, z, 0, 0, nz, pu, pv, lu, lv, kind, e);
           }
         }
       };
+      // Drawn without a depth buffer, so in painter's order: back, edges, face.
       face(-THICKNESS, -1, 1);
-      for (let k = 0; k < n; k++) {
-        const [x1, y1] = P(poly[k]);
-        const [x2, y2] = P(poly[(k + 1) % n]);
-        const l = Math.hypot(x2 - x1, y2 - y1) || 1;
-        const nx = (y2 - y1) / l;
-        const ny = -(x2 - x1) / l;
-        push(x1, y1, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, -THICKNESS, nx, ny, 0, 0, 0, 2);
-        push(x1, y1, 0, nx, ny, 0, 0, 0, 2);
-        push(x2, y2, -THICKNESS, nx, ny, 0, 0, 0, 2);
-        push(x1, y1, -THICKNESS, nx, ny, 0, 0, 0, 2);
+      for (const [a, b] of tris) {
+        const sides: [Pt, Pt][] = rimOnly ? [[a, b]] : [[a, b], [o, a], [b, o]];
+        for (const [p, q] of sides) {
+          const l = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+          const nx = (q.y - p.y) / l;
+          const ny = -(q.x - p.x) / l;
+          const [pu, pv] = pageUv(p);
+          const [qu, qv] = pageUv(q);
+          const quad: [Pt, number, number, number][] = [
+            [p, 0, pu, pv], [q, 0, qu, qv], [q, -THICKNESS, qu, qv],
+            [p, 0, pu, pv], [q, -THICKNESS, qu, qv], [p, -THICKNESS, pu, pv],
+          ];
+          for (const [pt, z, uu, vv] of quad) push(pt, z, nx, ny, 0, uu, vv, 0, 0, 2, 0);
+        }
       }
       face(0, 1, 0);
-    }
-    const whole = { first: wholeFirst, count: data.length / 9 - wholeFirst };
+      return { first, count: data.length / FLOATS - first };
+    };
 
-    // The etched label: frosted glass, a bright inner edge, the words.
+    const rim: [Pt, Pt][] = local.map((a, k) => [a, local[(k + 1) % local.length]]);
+    const whole = slab(rim, true);
+    const frags: Frag[] = [];
+    for (const [a, b] of rim) {
+      const t = rand(0.35, 0.65);
+      const m = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      for (const [p, q] of [[a, m], [m, b]] as const) {
+        const r = slab([[p, q]], false);
+        frags.push({ ...r, cx: (p.x + q.x) / 3, cy: (p.y + q.y) / 3, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, ax: 0, ay: 0, az: 1, angle: 0, spin: 0 });
+      }
+    }
+
+    // The lettering, drawn at the size it will hang at.
+    const k = size * Math.min(window.devicePixelRatio || 1, 2);
     const tc = document.createElement('canvas');
-    const k = 2;
-    tc.width = Math.ceil(bw * k);
-    tc.height = Math.ceil(bh * k);
+    tc.width = Math.max(2, Math.ceil(lw * k));
+    tc.height = Math.max(2, Math.ceil(lh * k));
     const g = tc.getContext('2d')!;
     g.scale(k, k);
-    g.translate(-bx, -by);
-    g.beginPath();
-    poly.forEach((p, n) => (n ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
-    g.closePath();
-    const grad = g.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
-    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
-    grad.addColorStop(0.55, 'rgba(244,246,243,0.82)');
-    grad.addColorStop(1, 'rgba(226,233,230,0.86)');
-    g.fillStyle = grad;
-    g.fill();
-    g.save();
-    g.clip();
-    for (let n = 0; n < 140; n++) {
-      g.fillStyle = `rgba(255,255,255,${rand(0.1, 0.35).toFixed(2)})`;
-      g.fillRect(rand(bx, bx + bw), rand(by, by + bh), 1, 1); // frost
-    }
-    g.strokeStyle = 'rgba(255,255,255,0.95)';
-    g.lineWidth = 3;
-    g.stroke();
-    g.restore();
-    g.strokeStyle = 'rgba(17,17,17,0.28)';
-    g.lineWidth = 1;
-    g.stroke();
+    // Where the label sits: the run across the middle of the level outline.
+    const midY = by1 - lh / 2;
+    const run: number[] = [];
+    level.forEach((p, n) => {
+      const q = level[(n + 1) % level.length];
+      if ((p.y - midY) * (q.y - midY) <= 0 && p.y !== q.y) run.push(p.x + ((midY - p.y) * (q.x - p.x)) / (q.y - p.y));
+    });
+    const left = (run.length ? Math.min(...run) : bx0) - bx0;
+    const right = (run.length ? Math.max(...run) : bx0 + lw) - bx0;
     const hint = touch ? undefined : item.hint;
-    const hintW = hint ? 34 : 0;
-    // As large as fits between the shard's ends.
-    let fs = Math.round(h * 0.42);
+    const hintFont = `500 ${9 / size}px "JetBrains Mono", monospace`;
+    g.font = hintFont;
+    const hintW = hint ? g.measureText(hint.toUpperCase()).width + 8 / size : 0;
+    const room = (right - left) * 0.84 - hintW;
+    let fs = Math.min(btnH * 0.4, lh * size * 0.5) / size;
     const font = () => `400 ${fs}px Fraunces, Georgia, serif`;
     g.font = font();
-    while (fs > 10 && g.measureText(item.label).width > w - hintW - 26) {
-      fs--;
+    while (fs * size > 9 && g.measureText(item.label).width > room) {
+      fs *= 0.95;
       g.font = font();
     }
-    g.fillStyle = '#111111';
+    const labelW = g.measureText(item.label).width;
+    const x0 = (left + right) / 2 - (labelW + hintW) / 2;
+    const cy = lh / 2 + fs * 0.05;
     g.textBaseline = 'middle';
-    g.textAlign = 'center';
-    g.fillText(item.label, -hintW / 2, 1);
+    g.textAlign = 'left';
+    // A faint light halo keeps the letters clear over dark things behind.
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    for (const [dx, dy] of [[-0.6, 0], [0.6, 0], [0, -0.6], [0, 0.6]]) g.fillText(item.label, x0 + dx / size, cy + dy / size);
+    g.fillStyle = 'rgba(17,17,17,0.92)';
+    g.fillText(item.label, x0, cy);
     if (hint) {
-      g.font = `500 9px "JetBrains Mono", monospace`;
-      g.fillStyle = 'rgba(17,17,17,0.5)';
-      g.textAlign = 'left';
-      g.fillText(hint.toUpperCase(), w / 2 - hintW + 2, 1);
+      g.font = hintFont;
+      g.fillStyle = 'rgba(17,17,17,0.55)';
+      g.fillText(hint.toUpperCase(), x0 + labelW + 8 / size, cy);
     }
-
-    const tex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    const label = makeTex(1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
 
-    const pose = { x: 0, y: -H, z: 0, rx: 0, ry: 0, rz: 0, s: 1 };
-    return { item, poly, whole, w, h, tex, frags, cur: { ...pose }, tgt: { ...pose }, delay: 0, state: 'hidden', alpha: 1, hover: 0, seed: rand(0, 10) };
+    const shard: Shard = {
+      item, local, whole, frags, label, rest, flat, size,
+      hw: (lw * size) / 2,
+      hh: (lh * size) / 2,
+      cur: { ...rest },
+      from: { ...rest },
+      t: 0,
+      dur: 1,
+      delay: 0,
+      state: source ? 'rest' : 'hidden',
+      alpha: 1,
+      hover: 0,
+      seed: rand(0, 10),
+    };
+    return shard;
   });
 
   const buf = gl.createBuffer();
@@ -416,41 +553,41 @@ export function createShardMenu(
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
   const attr = (name: string, n: number, offset: number) => {
     const loc = gl.getAttribLocation(program, name);
+    if (loc < 0) return;
     gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 36, offset * 4);
+    gl.vertexAttribPointer(loc, n, gl.FLOAT, false, FLOATS * 4, offset * 4);
   };
   attr('aPos', 3, 0);
   attr('aNormal', 3, 3);
-  attr('aUv', 2, 6);
-  attr('aKind', 1, 8);
+  attr('aUvPage', 2, 6);
+  attr('aUvLabel', 2, 8);
+  attr('aKind', 1, 10);
+  attr('aEdge', 1, 11);
 
   // ── Layout: stacked over the middle of the game frame ──
-  const SWAY = [
-    { dx: -12, rz: -0.045 },
-    { dx: 16, rz: 0.035 },
-    { dx: -6, rz: -0.02 },
-  ];
-  const slot = (i: number) => {
+  const SWAY = [-0.04, 0.035, -0.02];
+  const DX = [-12, 16, -6];
+  // Real shards come in different heights, so stack them by their own size.
+  const slot = (i: number): Pose => {
+    const s = shards[i];
     const r = anchor();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const gap = shardH + Math.min(16, r.height * 0.06);
-    const sx = cx + SWAY[i % 3].dx;
-    const sy = cy + (i - (shards.length - 1) / 2) * gap;
-    return { x: sx - W / 2, y: H / 2 - sy, rz: SWAY[i % 3].rz };
+    const gap = Math.min(16, r.height * 0.05);
+    const total = shards.reduce((t, x) => t + x.hh * 2, 0) + gap * (shards.length - 1);
+    let top = r.top + r.height / 2 - total / 2;
+    for (let k = 0; k < i; k++) top += shards[k].hh * 2 + gap;
+    const sx = r.left + r.width / 2 + DX[i % 3];
+    const sy = top + s.hh;
+    return { x: sx - W / 2, y: H / 2 - sy, z: 0, rx: 0, ry: 0, rz: s.flat + SWAY[i % 3], s: s.size, mix: 1 };
   };
+  const below = (s: Shard, i: number): Pose => ({ ...slot(i), y: -H / 2 - 140, z: -60, rx: rand(-1.4, 1.4), ry: rand(-1.4, 1.4), rz: s.flat + rand(-1, 1) });
 
   // ── Picking: project each shard's outline and test the pointer ──
   let pointer: Pt | null = null;
   let focused: string | null = null;
   let busy = false;
-  const model = (s: Shard): M4 => {
-    const c = s.cur;
-    return mul(translate(c.x, c.y, c.z), mul(rot('z', c.rz), mul(rot('y', c.ry), mul(rot('x', c.rx), scale(c.s)))));
-  };
-  const project = (m: M4, p: Pt): Pt => {
-    const x = p.x;
-    const y = -p.y;
+  const model = (p: Pose): M4 =>
+    mul(translate(p.x, p.y, p.z), mul(rot('z', p.rz), mul(rot('y', p.ry), mul(rot('x', p.rx), scaleM(p.s)))));
+  const project = (m: M4, x: number, y: number): Pt => {
     const wx = m[0] * x + m[4] * y + m[12];
     const wy = m[1] * x + m[5] * y + m[13];
     const wz = m[2] * x + m[6] * y + m[14];
@@ -470,20 +607,19 @@ export function createShardMenu(
   };
   const shardAt = (pt: Pt): Shard | null => {
     for (const s of shards) {
-      if (s.state !== 'idle' && s.state !== 'in') continue;
-      const m = model(s);
-      if (inside(pt, s.poly.map((p) => project(m, p)))) return s;
+      if (s.state !== 'idle') continue;
+      const m = model(s.cur);
+      if (inside(pt, s.local.map((p) => project(m, p.x, p.y)))) return s;
     }
     return null;
   };
 
   const onMove = (e: PointerEvent) => {
     pointer = { x: e.clientX, y: e.clientY };
-    const hit = !busy && api.visible ? shardAt(pointer) : null;
-    host.classList.toggle('is-over-shard', !!hit);
+    host.classList.toggle('is-over-shard', !busy && !!shardAt(pointer));
   };
   const onClick = (e: MouseEvent) => {
-    if (busy || !api.visible) return;
+    if (busy) return;
     const hit = shardAt({ x: e.clientX, y: e.clientY });
     if (!hit) return;
     e.preventDefault();
@@ -494,23 +630,36 @@ export function createShardMenu(
   host.addEventListener('click', onClick, true);
   window.addEventListener('resize', size);
 
-  // ── Loop ──
+  // ── Motion ──
+  const lerpPose = (a: Pose, b: Pose, e: number): Pose => {
+    const o = {} as Pose;
+    for (const k of Object.keys(a) as (keyof Pose)[]) o[k] = a[k] + (b[k] - a[k]) * e;
+    return o;
+  };
+  const fly = (s: Shard, state: Shard['state'], dur: number, delay = 0) => {
+    s.from = { ...s.cur };
+    s.state = state;
+    s.t = 0;
+    s.dur = dur;
+    s.delay = delay;
+  };
+
   let raf = 0;
   let last = performance.now();
-  let t = 0;
-  const ease = (k: number, dt: number) => 1 - Math.exp(-k * dt);
-  const draw = (m: M4, r: { first: number; count: number }, shadow: boolean) => {
+  let clock = 0;
+  const draw = (m: M4, r: Range, shadow: boolean) => {
     gl.uniformMatrix4fv(uModel, false, m);
     gl.uniform1f(uShadow, shadow ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, r.first, r.count);
   };
 
-  const frame = (now: number) => {
+  const render = (now: number) => {
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
-    t += dt;
+    clock += dt;
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    paintBackdrop();
     let live = false;
 
     shards.forEach((s, i) => {
@@ -518,40 +667,51 @@ export function createShardMenu(
       live = true;
       if (s.delay > 0) {
         s.delay -= dt;
-        return;
-      }
-      const home = slot(i);
-      const hot = !busy && s.state === 'idle' && ((pointer && shardAt(pointer) === s) || focused === s.item.id);
-      s.hover += ((hot ? 1 : 0) - s.hover) * ease(10, dt);
-
-      if (s.state === 'in' || s.state === 'idle') {
-        // Hang in place with a slow bob; lean toward the pointer when it's near.
+      } else if (s.state === 'peel' || s.state === 'home') {
+        // Scripted flight between the page and the menu, with one full flip.
+        const peel = s.state === 'peel';
+        s.t = Math.min(1, s.t + dt / s.dur);
+        const e = easeInOut(s.t);
+        s.cur = lerpPose(s.from, peel ? slot(i) : s.rest, e);
+        s.cur.z += Math.sin(Math.PI * s.t) * 150;
+        if (peel) s.cur.ry += Math.PI * 2 * e * (i % 2 ? -1 : 1);
+        s.cur.mix = peel
+          ? s.from.mix + (1 - s.from.mix) * smooth(clamp((s.t - 0.25) / 0.5, 0, 1))
+          : s.from.mix * (1 - smooth(clamp((s.t - 0.2) / 0.6, 0, 1)));
+        for (const f of s.frags) {
+          const k = 1 - Math.min(1, dt * 6);
+          f.x *= k;
+          f.y *= k;
+          f.z *= k;
+          f.angle *= k;
+        }
+        if (s.t >= 1) s.state = peel ? 'idle' : 'rest';
+      } else if (s.state === 'idle') {
+        // Hang with a slow bob; lean toward the pointer when it's on them.
+        const home = slot(i);
+        const hot = !busy && ((pointer && shardAt(pointer) === s) || focused === s.item.id);
+        s.hover += ((hot ? 1 : 0) - s.hover) * (1 - Math.exp(-10 * dt));
         let lx = 0;
         let ly = 0;
         if (pointer && s.hover > 0.01) {
-          const sx = home.x + W / 2;
-          const sy = H / 2 - home.y;
-          lx = Math.max(-1, Math.min(1, (pointer.x - sx) / (s.w / 2)));
-          ly = Math.max(-1, Math.min(1, (pointer.y - sy) / (s.h / 2)));
+          lx = clamp((pointer.x - (home.x + W / 2)) / s.hw, -1, 1);
+          ly = clamp((pointer.y - (H / 2 - home.y)) / s.hh, -1, 1);
         }
-        s.tgt = {
-          x: home.x,
-          y: home.y + Math.sin(t * 1.3 + s.seed) * 3,
-          z: s.hover * 26,
-          rx: Math.sin(t * 0.9 + s.seed) * 0.05 + ly * 0.3 * s.hover,
-          ry: Math.cos(t * 0.7 + s.seed) * 0.06 + lx * 0.38 * s.hover,
-          rz: home.rz + Math.sin(t * 0.6 + s.seed) * 0.015,
-          s: 1 + s.hover * 0.04,
+        const tgt: Pose = {
+          ...home,
+          y: home.y + Math.sin(clock * 1.3 + s.seed) * 3,
+          z: s.hover * 28,
+          rx: Math.sin(clock * 0.9 + s.seed) * 0.06 + ly * 0.32 * s.hover,
+          ry: Math.cos(clock * 0.7 + s.seed) * 0.08 + lx * 0.4 * s.hover,
+          rz: home.rz + Math.sin(clock * 0.6 + s.seed) * 0.015,
+          s: home.s * (1 + s.hover * 0.04),
         };
-        const k = s.state === 'in' ? 5 : 9;
-        const c = s.cur;
-        for (const key of ['x', 'y', 'z', 'rx', 'ry', 'rz', 's'] as const) c[key] += (s.tgt[key] - c[key]) * ease(k, dt);
-        if (s.state === 'in' && Math.abs(c.x - home.x) + Math.abs(c.y - home.y) + Math.abs(c.rz - home.rz) * 100 < 2) s.state = 'idle';
+        s.cur = lerpPose(s.cur, tgt, 1 - Math.exp(-9 * dt));
       } else if (s.state === 'out') {
-        const c = s.cur;
-        for (const key of ['x', 'y', 'z', 'rx', 'ry', 'rz', 's'] as const) c[key] += (s.tgt[key] - c[key]) * ease(4, dt);
-        s.alpha = Math.max(0, s.alpha - dt * 2.2);
-        if (s.alpha <= 0) s.state = 'hidden';
+        s.t = Math.min(1, s.t + dt / s.dur);
+        s.cur = lerpPose(s.from, below(s, i), easeInOut(s.t));
+        s.alpha = 1 - s.t;
+        if (s.t >= 1) s.state = 'hidden';
       } else if (s.state === 'burst') {
         for (const f of s.frags) {
           f.vy -= GRAVITY * dt;
@@ -560,70 +720,67 @@ export function createShardMenu(
           f.z += f.vz * dt;
           f.angle += f.spin * dt;
         }
-        s.alpha = Math.max(0, s.alpha - dt * 1.6);
+        s.alpha = Math.max(0, s.alpha - dt * 1.5);
         if (s.alpha <= 0) s.state = 'hidden';
       }
 
-      const m = model(s);
-      gl.bindTexture(gl.TEXTURE_2D, s.tex);
+      const m = model(s.cur);
+      const c = project(m, 0, 0);
+      gl.uniform2f(uCenter, c.x / W, c.y / H);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, s.label);
       gl.uniform1f(uAlpha, s.alpha);
-      gl.uniform1f(uGlow, s.hover * 0.05);
-      if (s.state === 'burst') {
+      gl.uniform1f(uMix, s.cur.mix);
+      gl.uniform1f(uGlow, s.hover * 0.04);
+      const apart = s.frags.some((f) => Math.abs(f.angle) > 0.01 || Math.abs(f.x) > 0.5);
+      if (s.state === 'burst' || apart) {
         for (const f of s.frags) {
-          const fm = mul(
-            m,
-            mul(translate(f.cx + f.x, f.cy + f.y, f.z), mul(axisAngle(f.ax, f.ay, f.az, f.angle), translate(-f.cx, -f.cy, 0))),
-          );
-          draw(fm, f, false);
+          draw(mul(m, mul(translate(f.cx + f.x, f.cy + f.y, f.z), mul(axisAngle(f.ax, f.ay, f.az, f.angle), translate(-f.cx, -f.cy, 0)))), f, false);
         }
       } else {
-        // A soft shadow cast on the room behind, then the glass.
-        draw(mul(translate(10, -14, -60 + s.cur.z * 0.5), m), s.whole, true);
+        if (s.cur.mix > 0.01) draw(mul(translate(12, -16, -70 + s.cur.z * 0.4), m), s.whole, true);
         draw(m, s.whole, false);
       }
     });
 
-    if (live) raf = requestAnimationFrame(frame);
-    else raf = 0;
+    raf = live ? requestAnimationFrame(render) : 0;
   };
   const run = () => {
     if (raf) return;
     last = performance.now();
-    raf = requestAnimationFrame(frame);
-  };
-
-  const flyOut = (s: Shard, k: number) => {
-    s.state = 'out';
-    s.tgt = { x: s.cur.x + rand(-80, 80), y: -H / 2 - 160 - k * 40, z: -120, rx: rand(-1.5, 1.5), ry: rand(-1.5, 1.5), rz: rand(-1, 1), s: 0.9 };
+    raf = requestAnimationFrame(render);
   };
 
   const api: ShardMenu = {
     get visible() {
-      return shards.some((s) => s.state === 'in' || s.state === 'idle');
+      return shards.some((s) => s.state === 'peel' || s.state === 'idle');
     },
 
-    show(from?: Pt) {
+    show() {
       busy = false;
       shards.forEach((s, i) => {
-        const home = slot(i);
-        const start = from
-          ? { x: from.x - W / 2 + rand(-40, 40), y: H / 2 - from.y + rand(-30, 30), z: 260 }
-          : { x: home.x + rand(-60, 60), y: -H / 2 - 120, z: -80 };
-        s.cur = { ...start, rx: rand(-2, 2), ry: rand(-2, 2), rz: rand(-1.5, 1.5), s: from ? 0.4 : 1 };
         s.alpha = 1;
         s.hover = 0;
-        s.state = 'in';
-        s.delay = (from ? 0.35 : 0.05) + i * 0.12;
         for (const f of s.frags) Object.assign(f, { x: 0, y: 0, z: 0, angle: 0 });
+        if (s.state === 'rest') {
+          fly(s, 'peel', 1.35, 0.22 + i * 0.14); // peel out of the page as it falls
+        } else {
+          s.cur = { ...below(s, i), mix: 1 };
+          fly(s, 'peel', 0.85, 0.05 + i * 0.1);
+        }
       });
-      run();
+      // Draw the first frame now: at the instant of the break the rest of the
+      // page is already in place, and these pieces must be too.
+      cancelAnimationFrame(raf);
+      last = performance.now();
+      render(last);
     },
 
     pick(id: string) {
       busy = true;
       host.classList.remove('is-over-shard');
-      shards.forEach((s, k) => {
-        if (s.item.id !== id) return flyOut(s, k);
+      shards.forEach((s) => {
+        if (s.item.id !== id) return fly(s, 'out', 0.45);
         s.state = 'burst';
         for (const f of s.frags) {
           const d = Math.hypot(f.cx, f.cy) || 1;
@@ -644,9 +801,28 @@ export function createShardMenu(
 
     hide() {
       busy = true;
-      shards.forEach((s, k) => s.state !== 'hidden' && flyOut(s, k));
+      shards.forEach((s) => s.state !== 'hidden' && fly(s, 'out', 0.4));
       run();
       return new Promise((r) => setTimeout(r, 380));
+    },
+
+    home() {
+      busy = true;
+      host.classList.remove('is-over-shard');
+      if (!source) return api.hide();
+      shards.forEach((s, i) => {
+        s.alpha = 1;
+        if (s.state === 'hidden' || s.state === 'out') {
+          // Out of view: come back up from below, reassembling on the way.
+          for (const f of s.frags) Object.assign(f, { x: 0, y: 0, z: 0, angle: 0 });
+          s.cur = { ...below(s, i), mix: 1 };
+        } else if (s.state === 'burst') {
+          s.cur = { ...s.cur, z: 80 };
+        }
+        fly(s, 'home', 0.95, i * 0.05);
+      });
+      run();
+      return new Promise((r) => setTimeout(r, 1150));
     },
 
     focus(id: string | null) {

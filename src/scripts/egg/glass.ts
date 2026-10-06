@@ -605,13 +605,18 @@ export async function shatter(at: Pt): Promise<void> {
   drawCracks(sc, 0, true);
   sc.restore();
 
-  // Prefer real 3D; without WebGL, the flat 2D fall.
-  const { create3D } = await import('./shards3d');
-  const scene = create3D(layer!, snap, web!.cells, web!.o, web!.R);
+  // Prefer real 3D; without WebGL, the flat 2D fall. Three good shards stay
+  // behind to become the menu.
+  const { create3D, clipToView } = await import('./shards3d');
+  const keep = menuShards(web!.cells, clipToView);
+  const scene = create3D(layer!, snap, web!.cells.filter((_, i) => !keep.includes(i)), web!.o, web!.R);
   const shards = scene ? [] : cut(snap, sx);
   if (scene) scene.rest();
   wipe(ctx!);
-  const arcade = openArcade({ fade: false, impact: web!.o });
+  const arcade = openArcade({
+    fade: false,
+    shardSource: scene ? { polys: keep.map((i) => clipToView(web!.cells[i], innerWidth, innerHeight)), snap } : undefined,
+  });
   burst(0.9, 3000, 0.5);
   for (let k = 0; k < 6; k++) tone(rand(2200, 4200), rand(1800, 3000), 0.12, 0.04, 'sine', 0.05 + k * 0.07);
   if (scene) {
@@ -627,7 +632,7 @@ export async function shatter(at: Pt): Promise<void> {
   if (sameView && !reduceMotion()) {
     layer!.style.pointerEvents = 'auto';
     tone(600, 1400, 0.5, 0.06, 'sine');
-    await (scene ? scene.rise() : rise(shards));
+    await Promise.all([scene ? scene.rise() : rise(shards), arcade.reassemble()]);
     await arcade.destroy(false);
     layer!.style.transition = 'opacity 0.5s ease';
     layer!.style.opacity = '0';
@@ -638,6 +643,33 @@ export async function shatter(at: Pt): Promise<void> {
   scene?.destroy();
   removeLayer();
   brand?.focus();
+}
+
+// The menu's shards are real pieces of the page: pick three that make good
+// buttons. Fairly large, solid (filling most of their own box), and longer
+// than tall once laid flat.
+function menuShards(cells: Pt[][], clip: (p: Pt[], w: number, h: number) => Pt[]): number[] {
+  const scored: { i: number; score: number }[] = [];
+  cells.forEach((cell, i) => {
+    const poly = clip(cell, innerWidth, innerHeight);
+    if (poly.length < 3) return;
+    const a = area(poly);
+    if (a < 2500) return;
+    let best = 0;
+    for (let k = 0; k < 36; k++) {
+      const t = (k / 36) * Math.PI;
+      const xs = poly.map((p) => p.x * Math.cos(t) - p.y * Math.sin(t));
+      const ys = poly.map((p) => p.x * Math.sin(t) + p.y * Math.cos(t));
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
+      const solid = a / (w * h);
+      const ratio = w / h;
+      if (solid > 0.45 && ratio > 1.7 && ratio < 6) best = Math.max(best, solid * Math.min(ratio, 3.2));
+    }
+    if (best) scored.push({ i, score: best * Math.sqrt(Math.min(a, 40000)) });
+  });
+  scored.sort((x, y) => y.score - x.score);
+  return scored.slice(0, 3).map((s) => s.i);
 }
 
 // A burst of light at the point of impact as the glass gives.

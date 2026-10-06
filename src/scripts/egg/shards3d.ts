@@ -98,7 +98,7 @@ void main() {
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 // Sutherland–Hodgman against the viewport, so no shard samples off the page.
-function clipToView(poly: Pt[], w: number, h: number): Pt[] {
+export function clipToView(poly: Pt[], w: number, h: number): Pt[] {
   const edges: [(p: Pt) => boolean, (a: Pt, b: Pt) => Pt][] = [
     [(p) => p.x >= 0, (a, b) => ({ x: 0, y: a.y + ((b.y - a.y) * (0 - a.x)) / (b.x - a.x) })],
     [(p) => p.x <= w, (a, b) => ({ x: w, y: a.y + ((b.y - a.y) * (w - a.x)) / (b.x - a.x) })],

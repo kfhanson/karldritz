@@ -518,6 +518,8 @@
 }
 .egg-arcade.has-shards [data-screen='menu'] {
   pointer-events: none;
+  background: none; /* the glass is the menu: the room stays clear behind it */
+  backdrop-filter: none;
 }
 .egg-arcade.is-over-shard,
 .egg-arcade.is-over-shard * {
