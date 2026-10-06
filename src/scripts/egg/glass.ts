@@ -2,7 +2,7 @@
 // then a snapshot of the viewport cut along exactly those cracks into shards
 // that fall away to reveal the arcade. Left alone, the crack heals back from
 // its tips to the point of impact. Closing the arcade plays the fall in reverse.
-import { burst, tone, warmAudio } from './audio';
+import { burst, tone } from './audio';
 
 type Pt = { x: number; y: number };
 
@@ -514,8 +514,12 @@ function prepare() {
 export function warm() {
   arcadeModule ??= import('./arcade');
   import('./snapshot');
-  warmAudio();
 }
+
+// Run after the next frame is on screen. The first sound builds the audio
+// engine and the snapshot clones the page; both take long enough to be felt,
+// so the crack gets painted before either starts.
+const afterPaint = (fn: () => void, delay = 0) => requestAnimationFrame(() => setTimeout(fn, delay));
 
 export function crack(hit: number, at: Pt) {
   ensureLayer();
@@ -531,10 +535,12 @@ export function crack(hit: number, at: Pt) {
   const next = REACH[hit + 1] ?? 1;
   runTo(to, RUN_MS, to + (next - to) * CREEP);
   animateCracks();
-  prepare();
   shake(2 + hit * 1.2, 240);
-  burst(0.09 + hit * 0.03, 2400 - hit * 250, 0.35 + hit * 0.08);
-  tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
+  afterPaint(() => {
+    burst(0.09 + hit * 0.03, 2400 - hit * 250, 0.35 + hit * 0.08);
+    tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
+  });
+  afterPaint(prepare, 80);
 }
 
 /** Let the glass mend, tips first. Resolves true once it's gone, false if struck again first. */

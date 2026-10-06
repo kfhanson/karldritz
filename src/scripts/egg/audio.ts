@@ -26,13 +26,6 @@ function audio(): AudioContext | null {
   return ctx;
 }
 
-/** Construct the context ahead of time: on some machines that alone takes a
- * few hundred ms, which shouldn't land on the click that cracks the glass. */
-export function warmAudio() {
-  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 50));
-  idle(() => audio());
-}
-
 export const isMuted = () => muted;
 
 export function setMuted(value: boolean) {
