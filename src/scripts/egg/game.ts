@@ -1,135 +1,106 @@
-// Bug Hunt — survival in a three-storey office. Bugs ride the elevators in,
-// round after round; each round is bigger, every fifth has a boss. A stair
-// core at each end of the building joins the floors, and the player aims with
-// the mouse.
+// Bug Hunt — a 2.5D survival arena. One office floor seen from a three-quarter
+// view; bugs come in through the lifts in the back wall and the side doors,
+// round after round, each round bigger and every fifth with a boss. Move with
+// WASD, aim at the cursor, dash out of trouble.
+//
+// The world is the floor plane in pixels; things with height (flyers, bullets,
+// sparks) carry a z and are drawn that far up the screen, with a shadow on
+// the floor. Everything is drawn back to front by its y.
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
 
 export const VIEW_W = 320;
 export const VIEW_H = 184;
-const T = 8; // tile size
 
-// Cross-section of the building. '#' is wall or floor slab. The slabs stop
-// short of both ends: those are the stair shafts.
-const MAP = [
-  '########################################',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#.......########################.......#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#.......########################.......#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '#......................................#',
-  '########################################',
+// ── The room ──
+const WALL_TOP = 8; // top edge of the back wall on screen
+const FLOOR_TOP = 40; // where the back wall meets the floor
+const SIDE = 10; // side wall thickness
+const FRONT = 176; // the low front wall
+const ARENA = { x0: SIDE + 2, x1: VIEW_W - SIDE - 2, y0: FLOOR_TOP + 4, y1: FRONT - 2 };
+
+type PropKind = 'desk' | 'pillar' | 'plant' | 'rack';
+interface Prop {
+  kind: PropKind;
+  x: number; // footprint on the floor
+  y: number;
+  w: number;
+  h: number;
+  height: number; // how tall it stands, for drawing
+  stopsShots: boolean;
+}
+const prop = (kind: PropKind, x: number, y: number, w: number, h: number, height: number, stopsShots = false): Prop =>
+  ({ kind, x, y, w, h, height, stopsShots });
+const PROPS: Prop[] = [
+  prop('pillar', 84, 92, 12, 7, 46, true),
+  prop('pillar', 224, 92, 12, 7, 46, true),
+  prop('desk', 34, 64, 30, 9, 8),
+  prop('desk', 256, 64, 30, 9, 8),
+  prop('desk', 40, 140, 30, 9, 8),
+  prop('desk', 250, 140, 30, 9, 8),
+  prop('rack', 146, 154, 28, 8, 30, true),
+  prop('plant', 120, 60, 6, 4, 14),
+  prop('plant', 194, 60, 6, 4, 14),
+  prop('plant', 20, 104, 6, 4, 14),
+  prop('plant', 294, 104, 6, 4, 14),
 ];
-const COLS = MAP[0].length;
-const ROWS = MAP.length;
 
-// Walking surface of each storey, top floor first.
-const FLOORS = [56, 112, 176];
-
-// Stairs, as one-way slopes: (x0, y0) is the foot, (x1, y1) the head. Bodies
-// land on them from above and pass under them otherwise. Flat ones are the
-// half-landings.
-interface Ramp {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-// Each end of the building has a stair core: switchback flights with a
-// half-landing against the outer wall, opening onto every floor through a
-// doorway at the shaft's inner edge.
-const SHAFT = 56; // shaft width
-const DOOR_L = 8 + SHAFT; // x of the left shaft's doorway
-const DOOR_R = VIEW_W - 8 - SHAFT;
-function stairCore(side: 1 | -1): Ramp[] {
-  const door = side > 0 ? DOOR_L : DOOR_R; // where flights meet each floor
-  const turn = door - side * 40; // where they meet the landing
-  const wall = side > 0 ? 8 : VIEW_W - 8;
-  const flights: Ramp[] = [];
-  for (let f = FLOORS.length - 1; f > 0; f--) {
-    const low = FLOORS[f];
-    const high = FLOORS[f - 1];
-    const mid = (low + high) / 2;
-    flights.push({ x0: door, y0: low, x1: turn, y1: mid }); // up to the landing
-    flights.push({ x0: wall, y0: mid, x1: turn, y1: mid }); // the landing
-    flights.push({ x0: turn, y0: mid, x1: door, y1: high }); // on up to the next floor
-  }
-  return flights;
-}
-const RAMPS: Ramp[] = [...stairCore(1), ...stairCore(-1)];
-const isLanding = (r: Ramp) => r.y0 === r.y1;
-
-// Elevator doors in the central core, two on every floor.
-const CORE_L = 132;
-const CORE_R = 188;
-const LIFTS = FLOORS.flatMap((_, floor) => [
-  { x: 146, floor },
-  { x: 174, floor },
-]);
+// Where bugs come in: three lifts in the back wall, a door in each side wall.
+type DoorSide = 'back' | 'left' | 'right';
+const DOORS: { x: number; y: number; side: DoorSide }[] = [
+  { x: 112, y: FLOOR_TOP, side: 'back' },
+  { x: 160, y: FLOOR_TOP, side: 'back' },
+  { x: 208, y: FLOOR_TOP, side: 'back' },
+  { x: SIDE, y: 118, side: 'left' },
+  { x: VIEW_W - SIDE, y: 118, side: 'right' },
+];
 
 const STEP = 1 / 60;
 const MAX_HP = 5;
-const RUN = 92;
-const JUMP = 245;
-const BULLET = 320;
+const SPEED = 80;
+const DASH_SPEED = 250;
+const DASH_TIME = 0.17;
+const DASH_COOL = 0.65;
+const BULLET = 300;
+const GUN_Z = 7; // shots fly at chest height
 
 // Office colours, kept to the site palette plus glass and steel.
-const WALL = '#F6F5F1';
+const WALL = '#F1EFE9';
+const FLOOR_A = '#ECEAE3';
+const FLOOR_B = '#E7E4DC';
+const GROUT = '#DDD9D0';
+const RUG = '#D9E0DA';
 const GLASS = '#E2E7E5';
 const SKYLINE = '#CDD4D0';
 const MULLION = '#9C9B94';
 const STEEL = '#BDBBB3';
-const CONCRETE = '#E7E5DF';
-const CONCRETE_LINE = '#DDDAD3';
-const PANEL = '#EEECE6';
-const PANEL_SEAM = '#E2E0D9';
-const EXIT = '#2F8F5B';
-const SERVERS = [CORE_R + 8, CORE_R + 22];
 const STEEL_HI = '#D6D4CD';
-const LIGHT = '#FFF4D6';
+const SHADOW = 'rgba(17,17,17,0.16)';
 
 type Kind = 'crawler' | 'flyer' | 'brute' | 'boss';
 
 interface Body {
-  x: number;
+  x: number; // feet on the floor
   y: number;
-  w: number;
-  h: number;
+  z: number; // height above it
   vx: number;
   vy: number;
-  ground: boolean;
-  wall: boolean;
-  ramp: Ramp | null;
-  climb?: number; // at a fork in the stairs: +1 take the way up, -1 the way down
+  vz: number;
+  r: number; // footprint radius
 }
 
 interface Player extends Body {
   face: 1 | -1;
+  back: boolean; // aiming up the room: show the robot from behind
   hp: number;
   inv: number;
-  coyote: number;
-  buffer: number;
   cool: number;
-  drop: number;
   rapid: number;
+  dash: number; // time left in a dash
+  dashCool: number;
+  dx: number; // dash direction
+  dy: number;
   anim: number;
   dead: boolean;
 }
@@ -137,11 +108,16 @@ interface Player extends Body {
 interface Enemy extends Body {
   kind: Kind;
   hp: number;
-  dir: 1 | -1;
   speed: number;
+  dir: 1 | -1;
   flash: number;
   t: number;
-  hop: number;
+  // Crawler lunges and boss charges: wind up, then go.
+  wind: number;
+  rush: number;
+  rx: number;
+  ry: number;
+  next: number;
   life: number; // attract mode only: wanders off after this long
 }
 
@@ -156,12 +132,13 @@ interface Bullet {
 interface Particle {
   x: number;
   y: number;
+  z: number;
   vx: number;
   vy: number;
+  vz: number;
   life: number;
   max: number;
   color: string;
-  grav: number;
 }
 
 interface Pickup extends Body {
@@ -169,14 +146,14 @@ interface Pickup extends Body {
   life: number;
 }
 
-interface Lift {
+interface Door {
   x: number;
-  floor: number;
-  charge: number; // seconds until the doors let something out
-  total: number;
+  y: number;
+  side: DoorSide;
+  charge: number; // seconds until the door lets something out
   queue: Kind | null;
   open: number; // 0 shut … 1 open
-  hold: number; // seconds the doors stay open after a spawn
+  hold: number;
 }
 
 export interface Hud {
@@ -200,28 +177,15 @@ export type Action = 'left' | 'right' | 'up' | 'down' | 'jump' | 'fire';
 /** How the player aims: at the mouse, along their facing, or at the nearest bug (touch). */
 export type AimMode = 'mouse' | 'facing' | 'auto';
 
-const STATS: Record<Kind, { w: number; h: number; score: number }> = {
-  crawler: { w: 8, h: 6, score: 10 },
-  flyer: { w: 7, h: 5, score: 15 },
-  brute: { w: 12, h: 12, score: 50 },
-  boss: { w: 24, h: 24, score: 400 },
+const STATS: Record<Kind, { r: number; score: number }> = {
+  crawler: { r: 4, score: 10 },
+  flyer: { r: 4, score: 15 },
+  brute: { r: 7, score: 50 },
+  boss: { r: 13, score: 400 },
 };
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
-const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
-  a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-
-const tile = (c: number, r: number) => (c < 0 || c >= COLS || r < 0 || r >= ROWS ? '#' : MAP[r][c]);
-const solidAt = (x: number, y: number) => tile(Math.floor(x / T), Math.floor(y / T)) === '#';
-
-const rampSpan = (r: Ramp) => [Math.min(r.x0, r.x1), Math.max(r.x0, r.x1)];
-const rampY = (r: Ramp, x: number) => r.y0 + ((x - r.x0) * (r.y1 - r.y0)) / (r.x1 - r.x0);
-
-/** Storey a pair of feet belongs to (0 = top). Mid-flight counts as the storey below. */
-function floorOf(feet: number): number {
-  for (let i = 0; i < FLOORS.length; i++) if (feet <= FLOORS[i] + 2) return i;
-  return FLOORS.length - 1;
-}
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 function loadBest(): number {
   try {
@@ -230,6 +194,37 @@ function loadBest(): number {
     return 0;
   }
 }
+
+/** Push a circle out of the room's walls and furniture. */
+function collide(b: Body, solid = true) {
+  b.x = clamp(b.x, ARENA.x0 + b.r, ARENA.x1 - b.r);
+  b.y = clamp(b.y, ARENA.y0 + b.r * 0.5, ARENA.y1);
+  if (!solid) return;
+  for (const p of PROPS) {
+    const cx = clamp(b.x, p.x, p.x + p.w);
+    const cy = clamp(b.y, p.y, p.y + p.h);
+    const dx = b.x - cx;
+    const dy = b.y - cy;
+    const d = Math.hypot(dx, dy);
+    if (d >= b.r) continue;
+    if (d > 0.001) {
+      b.x = cx + (dx / d) * b.r;
+      b.y = cy + (dy / d) * b.r;
+    } else {
+      // Centre inside the box: out the nearest side.
+      const out = [b.x - p.x, p.x + p.w - b.x, b.y - p.y, p.y + p.h - b.y];
+      const k = out.indexOf(Math.min(...out));
+      if (k === 0) b.x = p.x - b.r;
+      else if (k === 1) b.x = p.x + p.w + b.r;
+      else if (k === 2) b.y = p.y - b.r;
+      else b.y = p.y + p.h + b.r;
+    }
+  }
+}
+
+const blocked = (x: number, y: number, r: number) =>
+  x < ARENA.x0 + r || x > ARENA.x1 - r || y < ARENA.y0 || y > ARENA.y1 ||
+  PROPS.some((p) => x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r);
 
 export class Game {
   mode: 'attract' | 'play' | 'paused' | 'over' = 'attract';
@@ -243,7 +238,7 @@ export class Game {
   private time = 0;
 
   private held = new Set<Action>();
-  private jumpPressed = false;
+  private dashPressed = false;
   private aim = { x: VIEW_W / 2, y: VIEW_H / 2 };
   private aimMode: AimMode = 'facing';
 
@@ -253,7 +248,7 @@ export class Game {
   private particles: Particle[] = [];
   private pickups: Pickup[] = [];
   private pops: { x: number; y: number; text: string; life: number }[] = [];
-  private lifts: Lift[] = LIFTS.map((l) => ({ ...l, charge: 0, total: 1, queue: null, open: 0, hold: 0 }));
+  private doors: Door[] = DOORS.map((d) => ({ ...d, charge: 0, queue: null, open: 0, hold: 0 }));
 
   private round = 0;
   private phase: 'intro' | 'fight' | 'clear' = 'intro';
@@ -275,7 +270,7 @@ export class Game {
     private hooks: Hooks,
   ) {
     this.ctx = canvas.getContext('2d')!;
-    this.bg = this.paintOffice();
+    this.bg = this.paintRoom();
     this.resize(1);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
@@ -296,15 +291,16 @@ export class Game {
     this.pickups = [];
     this.particles = [];
     this.pops = [];
-    this.resetLifts();
+    this.resetDoors();
     this.score = 0;
     this.combo = 0;
     this.comboT = 0;
     this.deadT = 0;
     this.held.clear();
     this.player = {
-      x: 104, y: 176 - 11, w: 6, h: 11, vx: 0, vy: 0, ground: false, wall: false, ramp: null, climb: 1,
-      face: 1, hp: MAX_HP, inv: 0, coyote: 0, buffer: 0, cool: 0, drop: 0, rapid: 0, anim: 0, dead: false,
+      x: 160, y: 118, z: 0, vx: 0, vy: 0, vz: 0, r: 4,
+      face: 1, back: false, hp: MAX_HP, inv: 0, cool: 0, rapid: 0,
+      dash: 0, dashCool: 0, dx: 1, dy: 0, anim: 0, dead: false,
     };
     this.mode = 'play';
     this.startRound(1);
@@ -322,14 +318,14 @@ export class Game {
     this.last = performance.now();
   }
 
-  /** Back to the idle building behind the menu. */
+  /** Back to the idle room behind the menu. */
   attract() {
     this.mode = 'attract';
     this.player = null;
     this.enemies = [];
     this.bullets = [];
     this.pickups = [];
-    this.resetLifts();
+    this.resetDoors();
   }
 
   destroy() {
@@ -337,7 +333,7 @@ export class Game {
   }
 
   press(a: Action) {
-    if (a === 'jump' && !this.held.has('jump')) this.jumpPressed = true;
+    if (a === 'jump' && !this.held.has('jump')) this.dashPressed = true;
     this.held.add(a);
   }
 
@@ -355,8 +351,8 @@ export class Game {
     this.aimMode = mode;
   }
 
-  private resetLifts() {
-    for (const l of this.lifts) Object.assign(l, { charge: 0, queue: null, open: 0, hold: 0 });
+  private resetDoors() {
+    for (const d of this.doors) Object.assign(d, { charge: 0, queue: null, open: 0, hold: 0 });
   }
 
   // ── Loop ──
@@ -386,13 +382,14 @@ export class Game {
     if (this.mode === 'play') this.updateRound(dt);
     else this.updateAttract(dt);
 
-    this.updateLifts(dt);
+    this.updateDoors(dt);
     if (this.player) this.updatePlayer(this.player, dt);
     for (const e of this.enemies) this.updateEnemy(e, dt);
+    this.separate();
     this.updateBullets(dt);
     this.updatePickups(dt);
     this.updateFx(dt);
-    this.jumpPressed = false;
+    this.dashPressed = false;
 
     if (this.comboT > 0 && (this.comboT -= dt) <= 0) this.combo = 0;
     this.enemies = this.enemies.filter((e) => e.hp > 0 && e.life > 0);
@@ -407,13 +404,13 @@ export class Game {
     this.toSpawn = this.roster(r);
     this.spawnT = 0;
     const boss = r % 5 === 0;
-    this.hooks.banner(`Round ${r}`, boss ? 'Something big is riding the elevator' : `${this.toSpawn.length} bugs inbound`);
+    this.hooks.banner(`Round ${r}`, boss ? 'Something big is riding the lift' : `${this.toSpawn.length} bugs inbound`);
     [523, 659, 784].forEach((f, i) => tone(f, f, 0.12, 0.08, 'square', i * 0.11));
   }
 
   private roster(r: number): Kind[] {
     const list: Kind[] = [];
-    const n = 4 + r * 3;
+    const n = 5 + r * 3;
     const flyer = r >= 2 ? Math.min(0.4, 0.1 + 0.05 * r) : 0;
     const brute = r >= 4 ? Math.min(0.2, 0.04 + 0.02 * r) : 0;
     for (let i = 0; i < n; i++) {
@@ -434,12 +431,12 @@ export class Game {
     this.phaseT -= dt;
     if (this.phase === 'intro' && this.phaseT <= 0) this.phase = 'fight';
     else if (this.phase === 'fight') {
-      const maxAlive = Math.min(16, 5 + this.round);
+      const maxAlive = Math.min(18, 6 + this.round);
       this.spawnT -= dt;
       if (this.spawnT <= 0 && this.toSpawn.length && this.enemies.length + this.queued() < maxAlive) {
-        if (this.callLift(this.toSpawn[0])) {
+        if (this.callDoor(this.toSpawn[0])) {
           this.toSpawn.shift();
-          this.spawnT = Math.max(0.4, 1.4 - this.round * 0.08);
+          this.spawnT = Math.max(0.35, 1.3 - this.round * 0.08);
         }
       }
       if (!this.toSpawn.length && !this.queued() && !this.enemies.length) {
@@ -454,99 +451,97 @@ export class Game {
   }
 
   private updateAttract(dt: number) {
-    // Keep the building alive behind the menu: a few bugs wander the floors.
+    // Keep the room alive behind the menu: a few bugs wander about.
     this.spawnT -= dt;
-    if (this.spawnT <= 0 && this.enemies.length + this.queued() < 5) {
-      this.callLift(Math.random() < 0.35 ? 'flyer' : 'crawler');
-      this.spawnT = rand(1.5, 3);
+    if (this.spawnT <= 0 && this.enemies.length + this.queued() < 6) {
+      this.callDoor(Math.random() < 0.35 ? 'flyer' : 'crawler');
+      this.spawnT = rand(1.2, 2.6);
     }
     for (const e of this.enemies) e.life -= dt;
   }
 
   private queued() {
-    return this.lifts.filter((l) => l.queue).length;
+    return this.doors.filter((d) => d.queue).length;
   }
 
-  // Pick an idle elevator, preferring ones away from the player so nothing
-  // spawns on top of them.
-  private callLift(kind: Kind): boolean {
+  // Pick an idle door, preferring ones away from the player.
+  private callDoor(kind: Kind): boolean {
     const p = this.player;
-    let free = this.lifts.filter((l) => !l.queue);
+    let free = this.doors.filter((d) => !d.queue && (kind !== 'boss' || d.side === 'back'));
     if (p && free.length > 1) {
-      const far = free.filter((l) => Math.abs(l.x - (p.x + p.w / 2)) > 60 || floorOf(p.y + p.h) !== l.floor);
+      const far = free.filter((d) => Math.hypot(d.x - p.x, d.y - p.y) > 70);
       if (far.length) free = far;
     }
     if (!free.length) return false;
-    const l = free[Math.floor(Math.random() * free.length)];
-    l.queue = kind;
-    l.total = l.charge = kind === 'boss' ? 1.8 : 0.9;
+    const d = free[Math.floor(Math.random() * free.length)];
+    d.queue = kind;
+    d.charge = kind === 'boss' ? 1.8 : 0.9;
     if (this.mode === 'play') tone(kind === 'boss' ? 330 : 880, kind === 'boss' ? 330 : 880, 0.08, 0.04, 'sine');
     return true;
   }
 
-  private updateLifts(dt: number) {
-    for (const l of this.lifts) {
-      if (l.queue) {
-        l.charge -= dt;
-        // Doors slide open over the last part of the wait.
-        l.open = Math.min(1, Math.max(0, 1 - l.charge / 0.4));
-        if (l.charge <= 0) {
-          this.spawn(l.queue, l);
-          if (this.mode === 'play') tone(1175, 1175, 0.12, 0.05, 'sine'); // ding
-          l.queue = null;
-          l.hold = 0.6;
+  private updateDoors(dt: number) {
+    for (const d of this.doors) {
+      if (d.queue) {
+        d.charge -= dt;
+        d.open = clamp(1 - d.charge / 0.4, 0, 1); // doors part over the last moments
+        if (d.charge <= 0) {
+          this.spawn(d.queue, d);
+          if (this.mode === 'play' && d.side === 'back') tone(1175, 1175, 0.12, 0.05, 'sine'); // lift ding
+          d.queue = null;
+          d.hold = 0.6;
         }
-      } else if (l.hold > 0) {
-        l.hold -= dt;
-      } else {
-        l.open = Math.max(0, l.open - dt * 2.5);
-      }
+      } else if (d.hold > 0) d.hold -= dt;
+      else d.open = Math.max(0, d.open - dt * 2.5);
     }
   }
 
-  private spawn(kind: Kind, lift: Lift) {
-    const s = STATS[kind];
+  private spawn(kind: Kind, d: Door) {
     const r = Math.max(1, this.round);
     const hp = { crawler: r >= 6 ? 3 : 2, flyer: r >= 8 ? 2 : 1, brute: 8 + r, boss: 30 + r * 5 }[kind];
     const speed = {
-      crawler: Math.min(72, 34 + r * 2.5),
-      flyer: Math.min(70, 38 + r * 2),
-      brute: Math.min(34, 20 + r),
-      boss: 18,
+      crawler: Math.min(66, 32 + r * 2.5),
+      flyer: Math.min(64, 36 + r * 2),
+      brute: Math.min(30, 18 + r),
+      boss: 16,
     }[kind];
-    const floor = FLOORS[lift.floor];
+    const rad = STATS[kind].r;
+    // Step out of the doorway into the room.
+    const x = d.side === 'left' ? SIDE + rad + 2 : d.side === 'right' ? VIEW_W - SIDE - rad - 2 : d.x;
+    const y = d.side === 'back' ? FLOOR_TOP + rad + 2 : d.y;
     this.enemies.push({
-      kind, x: lift.x - s.w / 2, y: floor - s.h - (kind === 'flyer' ? 8 : 0), w: s.w, h: s.h,
-      vx: 0, vy: 0, ground: false, wall: false, ramp: null, hp,
-      dir: lift.x < VIEW_W / 2 ? 1 : -1, // step out into the building
-      speed, flash: 0, t: Math.random() * 10, hop: rand(0.8, 2),
+      kind, x, y, z: kind === 'flyer' ? 12 : 0, vx: 0, vy: 0, vz: 0, r: rad, hp, speed,
+      dir: 1, flash: 0, t: Math.random() * 10, wind: 0, rush: 0, rx: 0, ry: 0, next: rand(1.5, 3),
       life: this.mode === 'play' ? Infinity : rand(9, 14),
     });
-    this.puff(lift.x, floor - 8, kind === 'boss' ? 26 : 6, PAL.r);
+    this.puff(x, y, kind === 'boss' ? 26 : 6, PAL.r);
     if (kind === 'boss') this.shake(6, 0.5);
   }
 
   // ── Player ──
+  private gun(p: Player) {
+    return { x: p.x, y: p.y - GUN_Z }; // on screen
+  }
+
   private aimDir(p: Player): { x: number; y: number } {
-    const cx = p.x + p.w / 2;
-    const cy = p.y + 6;
+    const g = this.gun(p);
     let tx: number | null = null;
-    let ty = cy;
+    let ty = 0;
     if (this.aimMode === 'mouse') {
       tx = this.aim.x;
       ty = this.aim.y;
     } else if (this.aimMode === 'auto') {
-      let best = 160 * 160;
+      let best = 150 * 150;
       for (const e of this.enemies) {
-        const dx = e.x + e.w / 2 - cx;
-        const dy = e.y + e.h / 2 - cy;
-        const d = dx * dx + dy * dy;
-        if (e.hp > 0 && d < best) [best, tx, ty] = [d, e.x + e.w / 2, e.y + e.h / 2];
+        const ex = e.x;
+        const ey = e.y - e.z - 4;
+        const d = (ex - g.x) ** 2 + (ey - g.y) ** 2;
+        if (e.hp > 0 && d < best) [best, tx, ty] = [d, ex, ey];
       }
     }
     if (tx === null) return { x: p.face, y: 0 };
-    const dx = tx - cx;
-    const dy = ty - cy;
+    const dx = tx - g.x;
+    const dy = ty - g.y;
     const d = Math.hypot(dx, dy);
     return d < 1 ? { x: p.face, y: 0 } : { x: dx / d, y: dy / d };
   }
@@ -554,90 +549,80 @@ export class Game {
   private updatePlayer(p: Player, dt: number) {
     if (p.dead) return;
     const h = this.held;
-    const ax = (h.has('right') ? 1 : 0) - (h.has('left') ? 1 : 0);
-    if (ax) {
-      p.vx += ax * (p.ground ? 1500 : 1000) * dt;
-      p.face = ax as 1 | -1;
+    let ix = (h.has('right') ? 1 : 0) - (h.has('left') ? 1 : 0);
+    let iy = (h.has('down') ? 1 : 0) - (h.has('up') ? 1 : 0);
+    const il = Math.hypot(ix, iy);
+    if (il) (ix /= il), (iy /= il);
+
+    p.dashCool -= dt;
+    if (this.dashPressed && p.dashCool <= 0 && p.dash <= 0) {
+      p.dash = DASH_TIME;
+      p.dashCool = DASH_COOL;
+      [p.dx, p.dy] = il ? [ix, iy] : [p.face, 0];
+      p.inv = Math.max(p.inv, DASH_TIME + 0.05);
+      tone(300, 900, 0.1, 0.06, 'triangle');
+    }
+    if (p.dash > 0) {
+      p.dash -= dt;
+      p.vx = p.dx * DASH_SPEED;
+      p.vy = p.dy * DASH_SPEED;
+      if (Math.random() < 0.6) this.dust(p.x, p.y, 1);
     } else {
-      const f = (p.ground ? 1800 : 500) * dt;
-      p.vx = Math.abs(p.vx) <= f ? 0 : p.vx - Math.sign(p.vx) * f;
+      // Quick to start, quick to stop: twin-stick, not ice.
+      const k = Math.min(1, (il ? 14 : 18) * dt);
+      p.vx += (ix * SPEED - p.vx) * k;
+      p.vy += (iy * SPEED - p.vy) * k;
     }
-    p.vx = Math.max(-RUN, Math.min(RUN, p.vx));
-    // W / S choose the way at a fork in the stairs; otherwise keep going the
-    // way you were.
-    if (h.has('up')) p.climb = 1;
-    else if (h.has('down')) p.climb = -1;
-    else if (p.ramp && !isLanding(p.ramp) && Math.abs(p.vx) > 8) {
-      p.climb = Math.sign(p.ramp.x1 - p.ramp.x0) === Math.sign(p.vx) ? 1 : -1;
-    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    collide(p);
+
     const aim = this.aimDir(p);
-    if (this.aimMode !== 'facing' && Math.abs(aim.x) > 0.05) p.face = aim.x < 0 ? -1 : 1;
-
-    p.coyote = p.ground ? 0.09 : p.coyote - dt;
-    p.buffer = this.jumpPressed ? 0.11 : p.buffer - dt;
-    if (p.buffer > 0 && p.coyote > 0) {
-      if (h.has('down') && p.ramp) {
-        p.drop = 0.25; // hop off the side of the stairs
-      } else {
-        p.vy = -JUMP;
-        this.dust(p.x + p.w / 2, p.y + p.h, 4);
-        tone(380, 760, 0.09, 0.07, 'square');
-      }
-      p.buffer = 0;
-      p.coyote = 0;
-    }
-    // Short hop when the button is let go early; heavier on the way down.
-    const g = p.vy < 0 && h.has('jump') ? 980 : 1700;
-    p.vy = Math.min(330, p.vy + g * dt);
-    p.drop -= dt;
-
-    const wasGround = p.ground;
-    const fallSpeed = p.vy;
-    this.move(p, dt, p.drop <= 0);
-    if (!wasGround && p.ground && fallSpeed > 160) {
-      this.dust(p.x + p.w / 2, p.y + p.h, 5);
-      burst(0.04, 500, 0.12, 'lowpass');
+    if (this.aimMode !== 'facing') {
+      if (Math.abs(aim.x) > 0.05) p.face = aim.x < 0 ? -1 : 1;
+      p.back = aim.y < -0.55;
+    } else {
+      if (ix) p.face = ix < 0 ? -1 : 1;
+      p.back = iy < 0 && !ix;
     }
 
     p.cool -= dt;
-    if (h.has('fire') && p.cool <= 0) {
-      p.cool = p.rapid > 0 ? 0.08 : 0.17;
-      const mx = p.x + p.w / 2 + aim.x * 6;
-      const my = p.y + 6 + aim.y * 6;
-      if (!solidAt(mx, my)) {
-        this.bullets.push({ x: mx, y: my, vx: aim.x * BULLET, vy: aim.y * BULLET, life: 1 });
-        this.particles.push({ x: mx, y: my, vx: aim.x * 30, vy: aim.y * 30, life: 0.06, max: 0.06, color: PAL.y, grav: 0 });
-      }
-      p.vx -= aim.x * 14; // a little recoil
+    if (h.has('fire') && p.cool <= 0 && p.dash <= 0) {
+      p.cool = p.rapid > 0 ? 0.08 : 0.16;
+      const bx = p.x + aim.x * 6;
+      const by = p.y + aim.y * 6;
+      this.bullets.push({ x: bx, y: by, vx: aim.x * BULLET, vy: aim.y * BULLET, life: 1.2 });
+      this.particles.push({ x: bx, y: by, z: GUN_Z, vx: aim.x * 30, vy: aim.y * 30, vz: 0, life: 0.06, max: 0.06, color: PAL.y });
       tone(900, 480, 0.05, 0.04, 'square');
     }
     p.inv -= dt;
     p.rapid -= dt;
-    p.anim += Math.abs(p.vx) * dt;
+    p.anim += Math.hypot(p.vx, p.vy) * dt;
 
     for (const e of this.enemies) {
-      if (p.inv > 0 || e.hp <= 0) break;
-      const hit = { x: e.x + 1, y: e.y + 1, w: e.w - 2, h: e.h - 2 };
-      if (overlap(p, hit)) this.hurt(p, p.x + p.w / 2 < e.x + e.w / 2 ? -1 : 1);
+      if (p.inv > 0 || e.hp <= 0 || e.z > 18) continue;
+      if (Math.hypot(p.x - e.x, p.y - e.y) < p.r + e.r - 1) {
+        const d = Math.hypot(p.x - e.x, p.y - e.y) || 1;
+        this.hurt(p, (p.x - e.x) / d, (p.y - e.y) / d);
+      }
     }
   }
 
-  private hurt(p: Player, dir: number) {
+  private hurt(p: Player, nx: number, ny: number) {
     p.hp -= 1;
     p.inv = 1.1;
-    p.vx = dir * 170;
-    p.vy = -180;
-    p.ramp = null;
+    p.vx = nx * 160;
+    p.vy = ny * 160;
     this.combo = 0;
     this.shake(5, 0.25);
     this.hitstop = 0.08;
-    this.puff(p.x + p.w / 2, p.y + p.h / 2, 8, PAL.g);
+    this.puff(p.x, p.y, 8, PAL.g);
     tone(220, 70, 0.25, 0.12, 'sawtooth');
     burst(0.15, 400, 0.35, 'lowpass');
     if (p.hp <= 0) {
       p.dead = true;
-      this.puff(p.x + p.w / 2, p.y + p.h / 2, 30, PAL.g);
-      this.puff(p.x + p.w / 2, p.y + p.h / 2, 12, PAL.c);
+      this.puff(p.x, p.y, 30, PAL.g);
+      this.puff(p.x, p.y, 12, PAL.c);
       this.shake(8, 0.5);
       [392, 330, 262, 196].forEach((f, i) => tone(f, f * 0.9, 0.2, 0.09, 'square', 0.2 + i * 0.16));
     }
@@ -656,158 +641,121 @@ export class Game {
     this.hooks.over({ score: this.score, round: this.round, best: this.best, record });
   }
 
-  // Axis-separated tile collision, then the stairs. Speeds stay under one tile
-  // per step, so nothing tunnels.
-  private move(b: Body, dt: number, stairs = true) {
-    b.wall = false;
-    b.x += b.vx * dt;
-    const r0 = Math.floor(b.y / T);
-    const r1 = Math.floor((b.y + b.h - 0.01) / T);
-    if (b.vx !== 0) {
-      const c = b.vx > 0 ? Math.floor((b.x + b.w - 0.01) / T) : Math.floor(b.x / T);
-      let blocked = false;
-      for (let r = r0; r <= r1; r++) if (tile(c, r) === '#') blocked = true;
-      if (blocked) {
-        // A lip of a few pixels (where a flight meets a floor) is stepped up
-        // onto rather than walked into.
-        const top = r1 * T;
-        let clear = true;
-        for (let r = r0; r < r1; r++) if (tile(c, r) === '#') clear = false;
-        if (clear && tile(c, r1 - 1) !== '#' && b.y + b.h - top <= 5) {
-          b.y = top - b.h;
-        } else {
-          b.x = b.vx > 0 ? c * T - b.w : (c + 1) * T;
-          b.vx = 0;
-          b.wall = true;
-        }
-      }
-    }
-
-    const prevBottom = b.y + b.h;
-    b.y += b.vy * dt;
-    b.ground = false;
-    const c0 = Math.floor(b.x / T);
-    const c1 = Math.floor((b.x + b.w - 0.01) / T);
-    if (b.vy > 0) {
-      const r = Math.floor((b.y + b.h - 0.01) / T);
-      for (let c = c0; c <= c1; c++) {
-        if (tile(c, r) === '#') {
-          b.y = r * T - b.h;
-          b.vy = 0;
-          b.ground = true;
-        }
-      }
-    } else if (b.vy < 0) {
-      const r = Math.floor(b.y / T);
-      for (let c = c0; c <= c1; c++) if (tile(c, r) === '#') (b.y = (r + 1) * T), (b.vy = 0);
-    }
-
-    // Stairs: land on them from above, walk onto them from the foot, stick to
-    // them on the way down. Where a landing meets two flights, take the one
-    // going the way the body wants (climb), and keep to the flight you're on.
-    const was = b.ramp;
-    b.ramp = null;
-    if (!stairs || b.vy < 0) return;
-    const cx = b.x + b.w / 2;
-    const dir = Math.sign(b.vx);
-    const want = b.climb ?? 0;
-    let pick: Ramp | null = null;
-    let best = -Infinity;
-    for (const r of RAMPS) {
-      const [lo, hi] = rampSpan(r);
-      if (cx < lo || cx > hi) continue;
-      const sy = rampY(r, cx);
-      if (prevBottom > sy + 3 || b.y + b.h < sy - (was === r ? 5 : 0)) continue;
-      const up = !isLanding(r) && dir !== 0 && Math.sign(r.x1 - r.x0) === dir;
-      // Stepping onto the stairs from a floor, ignore a flight going the wrong
-      // way: the way down starts just below the doorway, the way up level
-      // with it, so the body drops the few pixels onto the right one.
-      if (!was && !isLanding(r) && want < 0 && up) continue;
-      let score = r === was ? 1 : 0;
-      const ahead = cx + dir * 3;
-      if (dir && (ahead < lo || ahead > hi)) score -= 4; // about to run off its end
-      if (!isLanding(r) && dir) score += (up ? want : -want) * 2;
-      if (score > best) [best, pick] = [score, r];
-    }
-    if (pick) {
-      b.y = rampY(pick, cx) - b.h;
-      b.vy = 0;
-      b.ground = true;
-      b.ramp = pick;
-    }
+  // ── Bugs ──
+  private target(): { x: number; y: number } {
+    const p = this.player;
+    if (p && !p.dead) return { x: p.x, y: p.y };
+    // No one to chase: drift after a point that roams the room.
+    return { x: 160 + Math.sin(this.time * 0.35) * 120, y: 110 + Math.sin(this.time * 0.53) * 50 };
   }
 
-  // ── Monsters ──
-  private target(): { x: number; y: number; feet: number } {
-    const p = this.player;
-    if (p && !p.dead) return { x: p.x + p.w / 2, y: p.y + p.h / 2, feet: p.y + p.h };
-    // No one to chase: drift after a point that tours the floors.
-    const f = FLOORS[Math.floor(this.time / 7) % FLOORS.length];
-    return { x: 160 + Math.sin(this.time * 0.35) * 130, y: f - 8, feet: f };
+  // Head for (tx, ty), sliding round furniture: try the straight line, then
+  // fan out until a way is clear.
+  private steer(e: Enemy, tx: number, ty: number, speed: number) {
+    const base = Math.atan2(ty - e.y, tx - e.x);
+    const look = e.r + 6;
+    for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6]) {
+      const a = base + off * e.dir;
+      if (!blocked(e.x + Math.cos(a) * look, e.y + Math.sin(a) * look, e.r)) {
+        return { x: Math.cos(a) * speed, y: Math.sin(a) * speed };
+      }
+    }
+    return { x: Math.cos(base) * speed, y: Math.sin(base) * speed };
   }
 
   private updateEnemy(e: Enemy, dt: number) {
     e.t += dt;
     e.flash -= dt;
     const tgt = this.target();
-    const cx = e.x + e.w / 2;
-    const cy = e.y + e.h / 2;
+    const dist = Math.hypot(tgt.x - e.x, tgt.y - e.y);
 
     if (e.kind === 'flyer') {
-      // Flyers ignore the building: they're glitches, they go through walls.
-      const dx = tgt.x - cx;
-      const dy = tgt.y - cy;
-      const d = Math.hypot(dx, dy) || 1;
-      const wob = Math.sin(e.t * 4) * 22;
-      const wantX = (dx / d) * e.speed - (dy / d) * wob;
-      const wantY = (dy / d) * e.speed + (dx / d) * wob;
-      e.vx += (wantX - e.vx) * Math.min(1, 2.2 * dt);
-      e.vy += (wantY - e.vy) * Math.min(1, 2.2 * dt);
-      e.x = Math.max(T, Math.min(VIEW_W - T - e.w, e.x + e.vx * dt));
-      e.y = Math.max(T, Math.min(ROWS * T - T - e.h, e.y + e.vy * dt));
+      // Flyers hover over everything, weaving as they come.
+      const a = Math.atan2(tgt.y - e.y, tgt.x - e.x) + Math.sin(e.t * 3) * 0.9;
+      e.vx += (Math.cos(a) * e.speed - e.vx) * Math.min(1, 2.2 * dt);
+      e.vy += (Math.sin(a) * e.speed - e.vy) * Math.min(1, 2.2 * dt);
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      e.z = 11 + Math.sin(e.t * 5) * 2.5;
+      collide(e, false);
       e.dir = e.vx < 0 ? -1 : 1;
       return;
     }
 
-    // Walkers: chase on the same floor; otherwise make for the nearer stair
-    // core's doorway and take its flights the right way. A landing ends at the
-    // outer wall, and bouncing off it turns them onto the next flight.
-    // Bosses are too big for the stairs.
-    if (e.ground) {
-      const mine = floorOf(e.y + e.h);
-      const theirs = floorOf(tgt.feet);
-      const dx = tgt.x - cx;
-      // Compare heights, not floor numbers: a landing sits between floors.
-      const rise = e.y + e.h - tgt.feet;
-      e.climb = rise > 20 ? 1 : rise < -20 ? -1 : 0;
-      if (e.ramp) {
-        if (Math.abs(tgt.y - cy) < 16 && Math.abs(dx) > 6) e.dir = dx < 0 ? -1 : 1;
-      } else if (theirs === mine || e.kind === 'boss') {
-        if (Math.abs(dx) > 6) e.dir = dx < 0 ? -1 : 1;
-      } else if (cx > DOOR_L && cx < DOOR_R) {
-        const door = Math.abs(cx - DOOR_L) <= Math.abs(cx - DOOR_R) ? DOOR_L : DOOR_R;
-        e.dir = door < cx ? -1 : 1; // into the shaft
-      }
-      e.hop -= dt;
-      if (e.kind === 'crawler' && e.hop <= 0) {
-        e.hop = rand(1.2, 2.4);
-        if (theirs === mine && !e.ramp && Math.abs(dx) < 50 && Math.random() < 0.5) e.vy = -180;
+    // Lunge (crawlers) and charge (boss): wind up in place, then rush.
+    const lunges = e.kind === 'crawler' || e.kind === 'boss';
+    if (lunges && this.player && !this.player.dead) {
+      e.next -= dt;
+      const reach = e.kind === 'boss' ? 150 : 34;
+      if (e.wind <= 0 && e.rush <= 0 && e.next <= 0 && dist < reach) {
+        e.wind = e.kind === 'boss' ? 0.6 : 0.28;
+        e.rx = (tgt.x - e.x) / (dist || 1);
+        e.ry = (tgt.y - e.y) / (dist || 1);
       }
     }
-    const want = e.dir * e.speed;
-    e.vx += (want - e.vx) * Math.min(1, (e.ground ? 8 : 2) * dt);
-    e.vy = Math.min(330, e.vy + 1100 * dt);
-    this.move(e, dt, e.kind !== 'boss');
-    if (e.wall) e.dir = e.dir > 0 ? -1 : 1;
+    let want = { x: 0, y: 0 };
+    if (e.wind > 0) {
+      e.wind -= dt;
+      if (e.wind <= 0) {
+        e.rush = e.kind === 'boss' ? 0.55 : 0.3;
+        if (e.kind === 'crawler') e.vz = 70; // a little hop
+        else this.shake(3, 0.2);
+      }
+    } else if (e.rush > 0) {
+      e.rush -= dt;
+      const s = e.kind === 'boss' ? 190 : e.speed * 2.8;
+      want = { x: e.rx * s, y: e.ry * s };
+      if (e.rush <= 0) e.next = e.kind === 'boss' ? rand(2.5, 4) : rand(1.2, 2.6);
+    } else {
+      want = this.steer(e, tgt.x, tgt.y, e.speed);
+    }
+    const k = Math.min(1, (e.rush > 0 ? 12 : 6) * dt);
+    e.vx += (want.x - e.vx) * k;
+    e.vy += (want.y - e.vy) * k;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    if (e.z > 0 || e.vz) {
+      e.vz -= 500 * dt;
+      e.z = Math.max(0, e.z + e.vz * dt);
+      if (e.z === 0) e.vz = 0;
+    }
+    const bx = e.x;
+    const by = e.y;
+    collide(e);
+    // Stuck on furniture: go round the other way next time.
+    if (Math.hypot(e.x - bx, e.y - by) > 0.5 && Math.random() < 0.05) e.dir = e.dir > 0 ? -1 : 1;
+  }
+
+  // Bugs shoulder each other aside instead of stacking up.
+  private separate() {
+    const es = this.enemies;
+    for (let i = 0; i < es.length; i++) {
+      for (let j = i + 1; j < es.length; j++) {
+        const a = es[i];
+        const b = es[j];
+        if ((a.kind === 'flyer') !== (b.kind === 'flyer')) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy);
+        const min = a.r + b.r;
+        if (d >= min || d < 0.001) continue;
+        const push = (min - d) / 2;
+        const wa = a.kind === 'boss' ? 0.1 : 1;
+        const wb = b.kind === 'boss' ? 0.1 : 1;
+        a.x -= (dx / d) * push * wa;
+        a.y -= (dy / d) * push * wa;
+        b.x += (dx / d) * push * wb;
+        b.y += (dy / d) * push * wb;
+      }
+    }
   }
 
   private hitEnemy(e: Enemy, dx: number, dy: number) {
     e.hp -= 1;
     e.flash = 0.07;
     const heavy = e.kind === 'brute' || e.kind === 'boss';
-    e.vx += dx * (heavy ? 18 : 90);
-    if (e.kind === 'crawler') e.vy = Math.min(e.vy, -70);
-    if (e.kind === 'flyer') e.vy += dy * 60;
+    e.vx += dx * (heavy ? 20 : 110);
+    e.vy += dy * (heavy ? 20 : 110);
     burst(0.05, 3000, 0.2);
     if (e.hp > 0) return;
 
@@ -816,11 +764,9 @@ export class Game {
     const mult = this.mult();
     const pts = STATS[e.kind].score * mult;
     this.score += pts;
-    const cx = e.x + e.w / 2;
-    const cy = e.y + e.h / 2;
-    this.pops.push({ x: cx, y: e.y - 4, text: mult > 1 ? `+${pts}x${mult}` : `+${pts}`, life: 0.8 });
-    this.puff(cx, cy, e.kind === 'boss' ? 50 : heavy ? 20 : 10, e.kind === 'flyer' ? PAL.r : PAL.k);
-    this.puff(cx, cy, e.kind === 'boss' ? 20 : 4, PAL.r);
+    this.pops.push({ x: e.x, y: e.y - e.z - 14, text: mult > 1 ? `+${pts}x${mult}` : `+${pts}`, life: 0.8 });
+    this.puff(e.x, e.y, e.kind === 'boss' ? 50 : heavy ? 20 : 10, e.kind === 'flyer' ? PAL.r : PAL.k, e.z + 4);
+    this.puff(e.x, e.y, e.kind === 'boss' ? 20 : 4, PAL.r, e.z + 4);
     this.shake(e.kind === 'boss' ? 9 : heavy ? 3 : 1.5, e.kind === 'boss' ? 0.6 : 0.12);
     this.hitstop = e.kind === 'boss' ? 0.2 : heavy ? 0.06 : 0.025;
     tone(520, 110, 0.15, 0.08, 'square');
@@ -830,7 +776,7 @@ export class Game {
     const drop = e.kind === 'boss' || Math.random() < (heavy ? 0.3 : 0.06);
     if (p && drop) {
       const kind = e.kind === 'boss' || (p.hp < MAX_HP && Math.random() < 0.6) ? 'heart' : 'bolt';
-      this.pickups.push({ kind, x: cx - 3, y: cy - 3, w: 7, h: 6, vx: 0, vy: -120, ground: false, wall: false, ramp: null, life: 9 });
+      this.pickups.push({ kind, x: e.x, y: e.y, z: 6, vx: 0, vy: 0, vz: 90, r: 4, life: 9 });
     }
   }
 
@@ -844,14 +790,16 @@ export class Game {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
-      if (solidAt(b.x, b.y)) {
+      const wall = b.x < ARENA.x0 || b.x > ARENA.x1 || b.y < FLOOR_TOP || b.y > FRONT;
+      const hitProp = PROPS.some((p) => p.stopsShots && b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h + 2);
+      if (wall || hitProp) {
         b.life = 0;
-        this.puff(b.x, b.y, 3, PAL.m);
+        this.puff(b.x, b.y, 3, PAL.m, GUN_Z);
         continue;
       }
-      const box = { x: b.x - 1.5, y: b.y - 1.5, w: 3, h: 3 };
       for (const e of this.enemies) {
-        if (e.hp > 0 && overlap(box, e)) {
+        if (e.hp <= 0) continue;
+        if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 1.5) {
           this.hitEnemy(e, b.vx / BULLET, b.vy / BULLET);
           b.life = 0;
           break;
@@ -865,13 +813,14 @@ export class Game {
     const p = this.player;
     for (const k of this.pickups) {
       k.life -= dt;
-      k.vy = Math.min(200, k.vy + 600 * dt);
-      this.move(k, dt);
-      if (p && !p.dead && overlap(p, k)) {
+      k.vz -= 400 * dt;
+      k.z = Math.max(0, k.z + k.vz * dt);
+      if (k.z === 0) k.vz = Math.abs(k.vz) > 30 ? -k.vz * 0.4 : 0;
+      if (p && !p.dead && Math.hypot(p.x - k.x, p.y - k.y) < p.r + k.r) {
         k.life = 0;
         if (k.kind === 'heart') p.hp = Math.min(MAX_HP, p.hp + 1);
         else p.rapid = 6;
-        this.puff(k.x + 3, k.y + 3, 8, k.kind === 'heart' ? PAL.r : PAL.y);
+        this.puff(k.x, k.y, 8, k.kind === 'heart' ? PAL.r : PAL.y, 4);
         tone(660, 1320, 0.12, 0.07, 'triangle');
         tone(990, 1980, 0.12, 0.06, 'triangle', 0.06);
       }
@@ -882,9 +831,17 @@ export class Game {
   private updateFx(dt: number) {
     for (const q of this.particles) {
       q.life -= dt;
-      q.vy += q.grav * dt;
       q.x += q.vx * dt;
       q.y += q.vy * dt;
+      q.vz -= 380 * dt;
+      q.z += q.vz * dt;
+      if (q.z < 0) {
+        // Sparks bounce and skid on the floor.
+        q.z = 0;
+        q.vz = -q.vz * 0.35;
+        q.vx *= 0.6;
+        q.vy *= 0.6;
+      }
     }
     this.particles = this.particles.filter((q) => q.life > 0);
     for (const pop of this.pops) {
@@ -894,19 +851,19 @@ export class Game {
     this.pops = this.pops.filter((pop) => pop.life > 0);
   }
 
-  private puff(x: number, y: number, n: number, color: string) {
+  private puff(x: number, y: number, n: number, color: string, z = 6) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const s = rand(20, 110);
-      const life = rand(0.25, 0.6);
-      this.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life, max: life, color, grav: 300 });
+      const s = rand(20, 100);
+      const life = rand(0.3, 0.7);
+      this.particles.push({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: rand(40, 140), life, max: life, color });
     }
   }
 
   private dust(x: number, y: number, n: number) {
     for (let i = 0; i < n; i++) {
-      const life = rand(0.15, 0.3);
-      this.particles.push({ x, y: y - 1, vx: rand(-40, 40), vy: rand(-25, -5), life, max: life, color: PAL.w, grav: 0 });
+      const life = rand(0.2, 0.35);
+      this.particles.push({ x: x + rand(-2, 2), y: y + rand(-1, 1), z: 0, vx: rand(-15, 15), vy: rand(-8, 8), vz: rand(10, 30), life, max: life, color: PAL.w });
     }
   }
 
@@ -933,11 +890,11 @@ export class Game {
     this.hooks.hud(hud);
   }
 
-  // ── Drawing: the building ──
-  // Section through a three-storey office: stair cores at both ends, a lift
-  // core in the middle, glazed offices between. Top to bottom: a meeting room
-  // and a server corner, open-plan desks, the lobby.
-  private paintOffice(): HTMLCanvasElement {
+  // ── Drawing: the room ──
+  // Painted once: the back wall with its windows and lifts, the floor, the
+  // side walls and the low front wall. Furniture is drawn live, so bodies can
+  // pass behind it.
+  private paintRoom(): HTMLCanvasElement {
     const c = document.createElement('canvas');
     c.width = VIEW_W;
     c.height = VIEW_H;
@@ -947,234 +904,165 @@ export class Game {
       g.fillRect(x, y, w, h);
     };
 
-    // One skyline for the whole building; each storey sees a different slice.
+    px(0, 0, VIEW_W, VIEW_H, PAL.k);
+
+    // Back wall.
+    px(SIDE, WALL_TOP, VIEW_W - SIDE * 2, FLOOR_TOP - WALL_TOP, WALL);
+    px(SIDE, WALL_TOP, VIEW_W - SIDE * 2, 1, '#3A3A36');
     const skyline: number[] = [];
     for (let x = 0; x < VIEW_W; ) {
-      const w = 6 + Math.floor(Math.random() * 14);
-      const h = 6 + Math.floor(Math.random() * 18);
+      const w = 5 + Math.floor(Math.random() * 12);
+      const h = 4 + Math.floor(Math.random() * 12);
       for (let k = 0; k < w; k++) skyline.push(h);
       x += w;
     }
-
-    const storeys = FLOORS.map((floor, i) => ({ top: i === 0 ? 8 : FLOORS[i - 1] + 8, floor }));
-    const offices = [
-      [DOOR_L, CORE_L],
-      [CORE_R, DOOR_R],
-    ];
-
-    px(0, 0, VIEW_W, VIEW_H, WALL);
-
-    // Stair shafts: bare concrete, a shade darker than the offices.
-    for (const [x0, x1] of [[8, DOOR_L], [DOOR_R, VIEW_W - 8]]) {
-      px(x0, 8, x1 - x0, FLOORS[2] - 8, CONCRETE);
-      for (let y = 14; y < FLOORS[2]; y += 12) px(x0, y, x1 - x0, 1, CONCRETE_LINE); // block coursing
+    // Windows either side of the lift lobby.
+    for (const [x0, x1] of [[SIDE + 6, 96], [224, VIEW_W - SIDE - 6]]) {
+      const wy = WALL_TOP + 5;
+      const wh = 20;
+      px(x0, wy, x1 - x0, wh, GLASS);
+      for (let x = x0; x < x1; x++) {
+        const h = skyline[x];
+        px(x, wy + wh - h, 1, h, SKYLINE);
+        if (x % 3 === 0 && (x * 7) % 5 === 0) px(x, wy + wh - h + 2, 1, 1, WALL);
+      }
+      for (let x = x0 + 4; x < x1 - 6; x += 19) for (let d = 0; d < 6; d++) px(x + d, wy + 2 + d * 2, 1, 2, 'rgba(255,255,255,0.55)');
+      for (let x = x0; x <= x1; x += 14) px(Math.min(x, x1), wy, 1, wh, MULLION);
+      px(x0, wy, x1 - x0 + 1, 1, MULLION);
+      px(x0, wy + wh, x1 - x0 + 1, 1, MULLION);
     }
+    // Lift lobby panelling and frames.
+    px(96, WALL_TOP + 1, 128, FLOOR_TOP - WALL_TOP - 1, '#ECEAE4');
+    for (const d of DOORS) {
+      if (d.side !== 'back') continue;
+      px(d.x - 10, FLOOR_TOP - 25, 20, 25, PAL.m);
+      px(d.x - 9, FLOOR_TOP - 24, 18, 24, PAL.k);
+    }
+    // Ceiling lights along the wall head.
+    for (let x = SIDE + 14; x < VIEW_W - SIDE - 14; x += 34) px(x, WALL_TOP + 1, 12, 1, '#FFF4D6');
+    px(SIDE, FLOOR_TOP - 2, VIEW_W - SIDE * 2, 2, '#DAD7CF'); // skirting
 
-    // Lift core: a panelled wall.
-    storeys.forEach(({ top, floor }) => {
-      px(CORE_L, top, CORE_R - CORE_L, floor - top, PANEL);
-      for (let x = CORE_L + 7; x < CORE_R; x += 14) px(x, top, 1, floor - top, PANEL_SEAM);
-    });
-
-    storeys.forEach(({ top, floor }, si) => {
-      const lobby = si === 2;
-      // Glazing along each office.
-      for (const [a, b] of offices) {
-        const x0 = a + 4;
-        const x1 = b - 4;
-        const wy = top + 6;
-        const wh = floor - top - (lobby ? 10 : 15);
-        px(x0, wy, x1 - x0, wh, GLASS);
-        for (let x = x0; x < x1; x++) {
-          const h = Math.round(skyline[x] * (0.55 + si * 0.25));
-          px(x, wy + wh - h, 1, h, SKYLINE);
-          if (x % 3 === 0 && h > 6 && (x * 7 + si) % 5 === 0) px(x, wy + wh - h + 3, 1, 1, WALL); // lit windows
-        }
-        for (let x = x0 + 6 + (si * 5) % 9; x < x1 - 6; x += 22) {
-          for (let d = 0; d < 7; d++) px(x + d, wy + 2 + d * 2, 1, 2, 'rgba(255,255,255,0.55)'); // reflections
-        }
-        for (let x = x0; x <= x1; x += 16) px(Math.min(x, x1), wy, 1, wh, MULLION);
-        px(x0, wy, x1 - x0 + 1, 1, MULLION);
-        px(x0, wy + wh, x1 - x0 + 1, 1, MULLION);
-        px(x0, wy + wh + 1, x1 - x0 + 1, 1, PAL.w); // sill
-        // Ceiling lights.
-        for (let x = a + 8; x < b - 10; x += 26) {
-          px(x, top, 12, 1, LIGHT);
-          px(x - 2, top + 1, 16, 1, 'rgba(255,244,214,0.5)');
-        }
-        px(a, floor - 2, b - a, 1, PAL.w); // skirting
-      }
-
-      // Shaft doorways: a wall down to the door head, a frame, an exit sign.
-      for (const [door, side] of [[DOOR_L, 1], [DOOR_R, -1]] as const) {
-        const head = floor - 27;
-        px(door - 1, top, 2, head - top, PAL.m);
-        px(door - 3, head, 6, 1, PAL.m);
-        const sx = side > 0 ? door + 3 : door - 12;
-        px(sx, head - 7, 9, 4, EXIT);
-        px(sx + 2, head - 6, 5, 1, WALL);
-        px(side > 0 ? sx + 6 : sx + 2, head - 5, 1, 1, WALL); // arrow tip
-      }
-    });
-
-    // Slabs and walls.
-    for (let r = 0; r < ROWS; r++) {
-      for (let col = 0; col < COLS; col++) {
-        if (MAP[r][col] !== '#') continue;
-        px(col * T, r * T, T, T, PAL.k);
-        if (r > 0 && tile(col, r - 1) !== '#') px(col * T, r * T, T, 1, '#3A3A36');
+    // Floor: big tiles, a rug in the middle.
+    for (let y = FLOOR_TOP; y < FRONT; y += 12) {
+      for (let x = SIDE; x < VIEW_W - SIDE; x += 20) {
+        const odd = ((x - SIDE) / 20 + (y - FLOOR_TOP) / 12) % 2 === 1;
+        px(x, y, 20, 12, odd ? FLOOR_B : FLOOR_A);
       }
     }
+    for (let y = FLOOR_TOP; y < FRONT; y += 12) px(SIDE, y, VIEW_W - SIDE * 2, 1, GROUT);
+    for (let x = SIDE; x < VIEW_W - SIDE; x += 20) px(x, FLOOR_TOP, 1, FRONT - FLOOR_TOP, GROUT);
+    px(118, 86, 84, 48, RUG);
+    px(118, 86, 84, 1, '#C9D2CB');
+    px(118, 133, 84, 1, '#C9D2CB');
+    px(121, 89, 78, 1, '#C9D2CB');
+    px(121, 130, 78, 1, '#C9D2CB');
+    // A soft shade along the foot of the back wall.
+    px(SIDE, FLOOR_TOP, VIEW_W - SIDE * 2, 2, 'rgba(17,17,17,0.08)');
 
-    // ── Furniture ──
-    const plant = (x: number, f: number) => {
-      px(x, f - 4, 5, 4, PAL.k);
-      px(x + 1, f - 9, 1, 5, PAL.g);
-      px(x + 3, f - 10, 1, 6, PAL.g);
-      px(x, f - 8, 1, 2, PAL.l);
-      px(x + 4, f - 7, 1, 2, PAL.l);
-      px(x + 2, f - 11, 1, 2, PAL.l);
-    };
-    const chair = (x: number, f: number, face: number) => {
-      px(x, f - 6, 4, 1, PAL.m); // seat
-      px(face > 0 ? x : x + 3, f - 11, 1, 5, PAL.m); // back
-      px(x + 1, f - 5, 1, 3, PAL.m);
-      px(x, f - 2, 4, 1, PAL.m); // base
-    };
-    const desk = (x: number, f: number) => {
-      px(x, f - 8, 18, 1, PAL.k); // top
-      px(x + 1, f - 7, 1, 7, PAL.m);
-      px(x + 16, f - 7, 1, 7, PAL.m);
-      px(x + 2, f - 7, 6, 4, PAL.m); // drawers
-      px(x + 9, f - 14, 7, 5, PAL.k); // monitor
-      px(x + 10, f - 13, 5, 3, PAL.g);
-      px(x + 12, f - 9, 1, 1, PAL.k);
-      px(x + 3, f - 9, 3, 1, PAL.m); // keyboard
-      chair(x + 20, f, -1);
-    };
-
-    // Top floor: a glass-walled meeting room, and the server corner.
-    {
-      const { top, floor: f } = storeys[0];
-      const x0 = DOOR_L + 6;
-      const x1 = CORE_L - 6;
-      px(x0, top + 8, x1 - x0, f - top - 8, 'rgba(226,231,229,0.55)');
-      px(x0, top + 8, x1 - x0, 1, MULLION);
-      px(x0, top + 8, 1, f - top - 8, MULLION);
-      px(x1 - 1, top + 8, 1, f - top - 8, MULLION);
-      px(x0 + 16, top + 8, 1, f - top - 8, 'rgba(156,155,148,0.6)');
-      px(x0 + 20, top + 13, 22, 11, PAL.k); // wall screen
-      px(x0 + 21, top + 14, 20, 9, PAL.g);
-      px(x0 + 23, top + 20, 3, 2, PAL.l); // a chart on it
-      px(x0 + 27, top + 18, 3, 4, PAL.l);
-      px(x0 + 31, top + 16, 3, 6, PAL.l);
-      px(x0 + 12, f - 9, 32, 1, PAL.k); // table
-      px(x0 + 14, f - 8, 1, 8, PAL.m);
-      px(x0 + 41, f - 8, 1, 8, PAL.m);
-      chair(x0 + 6, f, 1);
-      chair(x0 + 46, f, -1);
-      // Server racks, LEDs drawn live.
-      for (const rx of SERVERS) {
-        px(rx, f - 30, 12, 30, PAL.k);
-        for (let y = f - 28; y < f - 2; y += 3) px(rx + 1, y, 10, 1, '#2A2A27');
-      }
-      plant(DOOR_R - 12, f);
+    // Side walls, seen from above: their tops, with door openings.
+    px(0, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
+    px(VIEW_W - SIDE, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
+    px(SIDE - 1, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
+    px(VIEW_W - SIDE, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
+    for (const d of DOORS) {
+      if (d.side === 'back') continue;
+      const x = d.side === 'left' ? 0 : VIEW_W - SIDE;
+      px(x, d.y - 12, SIDE, 14, '#2A2A27');
+      px(x, d.y - 13, SIDE, 1, PAL.m);
+      px(x, d.y + 2, SIDE, 1, PAL.m);
     }
-
-    // Middle floor: open-plan desks.
-    {
-      const f = storeys[1].floor;
-      desk(DOOR_L + 6, f);
-      desk(DOOR_L + 36, f);
-      desk(CORE_R + 6, f);
-      desk(CORE_R + 36, f);
-    }
-
-    // Ground floor: the lobby.
-    {
-      const { top, floor: f } = storeys[2];
-      const rx = DOOR_L + 10;
-      px(rx, f - 12, 44, 12, PAL.k); // reception counter
-      px(rx, f - 12, 44, 1, '#3A3A36');
-      px(rx + 2, f - 8, 40, 2, PAL.g);
-      px(rx + 16, f - 17, 7, 5, PAL.k); // monitor
-      px(rx + 17, f - 16, 5, 3, PAL.g);
-      px(rx + 18, top + 12, 8, 8, PAL.g); // the company mark on the wall
-      px(rx + 20, top + 14, 4, 4, WALL);
-      px(rx + 21, top + 15, 2, 2, PAL.g);
-      plant(rx + 48, f);
-      const sx = CORE_R + 8;
-      px(sx, f - 9, 32, 7, PAL.k); // sofa
-      px(sx + 2, f - 8, 13, 3, PAL.l);
-      px(sx + 17, f - 8, 13, 3, PAL.l);
-      px(sx, f - 13, 3, 11, PAL.k);
-      px(sx + 29, f - 13, 3, 11, PAL.k);
-      px(sx + 1, f - 2, 1, 2, PAL.k);
-      px(sx + 30, f - 2, 1, 2, PAL.k);
-      px(sx + 36, f - 5, 12, 1, PAL.k); // coffee table
-      px(sx + 37, f - 4, 1, 4, PAL.m);
-      px(sx + 46, f - 4, 1, 4, PAL.m);
-      plant(DOOR_R - 9, f);
-    }
-
-    // ── Stairs ──
-    for (const r of RAMPS) {
-      const [lo, hi] = rampSpan(r);
-      if (isLanding(r)) {
-        px(lo, r.y0, hi - lo, 4, PAL.k); // the half-landing slab
-        px(lo, r.y0, hi - lo, 1, '#3A3A36');
-        continue;
-      }
-      const rising = r.x1 > r.x0;
-      for (let x = lo; x < hi; x++) {
-        const k = Math.floor((x - lo) / 5);
-        const tread = Math.round(rampY(r, lo + k * 5 + 2.5)); // tread straddles the walking line
-        const under = Math.round(rampY(r, rising ? x : x + 1)) + 4;
-        px(x, tread, 1, Math.max(1, under - tread), PAL.k);
-        px(x, tread, 1, 1, '#3A3A36');
-        px(x, Math.round(rampY(r, x)) - 10, 1, 1, PAL.m); // handrail
-        if ((x - lo) % 13 === 6) px(x, Math.round(rampY(r, x)) - 9, 1, 8, PAL.w);
-      }
-    }
-
-    // Lift frames, and the floor number between each pair of doors.
-    for (const l of LIFTS) {
-      const f = FLOORS[l.floor];
-      px(l.x - 10, f - 28, 20, 28, PAL.m);
-      px(l.x - 9, f - 27, 18, 27, PAL.k);
-    }
-    FLOORS.forEach((f, i) => drawText(g, String(3 - i), (CORE_L + CORE_R) / 2, f - 24, PAL.m));
+    // Front wall.
+    px(0, FRONT, VIEW_W, VIEW_H - FRONT, PAL.k);
+    px(SIDE, FRONT, VIEW_W - SIDE * 2, 1, '#3A3A36');
     return c;
   }
 
-  private drawLifts() {
+  private drawProp(p: Prop) {
     const c = this.ctx;
-    for (const l of this.lifts) {
-      const f = FLOORS[l.floor];
-      const half = Math.round(8 * (1 - l.open));
-      // Doors slide apart from the centre seam.
-      c.fillStyle = STEEL;
-      c.fillRect(l.x - 8, f - 26, half, 26);
-      c.fillRect(l.x + 8 - half, f - 26, half, 26);
-      c.fillStyle = STEEL_HI;
-      if (half > 1) {
-        c.fillRect(l.x - 8, f - 26, 1, 26);
-        c.fillRect(l.x + 8 - half, f - 26, 1, 26);
-      }
-      // Call light: pine when idle, blinking rust when something's coming.
-      const coming = !!l.queue && Math.floor(this.time * 8) % 2 === 0;
-      c.fillStyle = coming ? PAL.r : l.queue ? PAL.k : PAL.g;
-      c.fillRect(l.x - 1, f - 31, 3, 2);
+    const px = (x: number, y: number, w: number, h: number, col: string) => {
+      c.fillStyle = col;
+      c.fillRect(Math.round(x), Math.round(y), w, h);
+    };
+    const { x, y, w, h, height } = p;
+    // Contact shadow on the floor.
+    px(x - 1, y + h - 1, w + 2, 3, SHADOW);
+    if (p.kind === 'pillar') {
+      px(x, y + h - height, w, height, '#D9D6CE'); // face
+      px(x, y + h - height, w, 2, '#EEECE6');
+      px(x + w - 3, y + h - height, 3, height, '#C9C5BC'); // side
+      px(x, y + h - 2, w, 2, '#BDB9AF'); // base
+      return;
     }
-    // Server LEDs, flickering.
-    const f = FLOORS[0];
-    SERVERS.forEach((rx, k) => {
-      for (let i = 0; i < 8; i++) {
-        const on = Math.sin(this.time * (3 + i * 1.7) + k * 5 + i) > 0.2;
-        c.fillStyle = on ? (i % 4 === 0 ? PAL.r : '#7FD39A') : '#2A2A27';
-        c.fillRect(rx + 9, f - 27 + i * 3, 1, 1);
+    if (p.kind === 'rack') {
+      px(x, y + h - height, w, height, PAL.k);
+      for (let yy = y + h - height + 3; yy < y + h - 2; yy += 3) px(x + 2, yy, w - 4, 1, '#2A2A27');
+      for (let i = 0; i < 6; i++) {
+        const on = Math.sin(this.time * (3 + i * 1.7) + i) > 0.2;
+        px(x + w - 4, y + h - height + 4 + i * 4, 1, 1, on ? (i % 3 === 0 ? PAL.r : '#7FD39A') : '#2A2A27');
       }
-    });
+      return;
+    }
+    if (p.kind === 'desk') {
+      const top = y + h - height - h; // the desktop, seen from above
+      px(x, top, w, h, '#E3E0D8');
+      px(x, top, w, 1, '#F3F1EC');
+      px(x, y + h - height, w, height, '#B9B5AB'); // front panel
+      px(x, y + h - height, w, 1, '#9F9B91');
+      px(x + 2, y + h - 2, 2, 2, PAL.m); // feet
+      px(x + w - 4, y + h - 2, 2, 2, PAL.m);
+      px(x + w / 2 - 6, top - 6, 12, 8, PAL.k); // monitor
+      px(x + w / 2 - 5, top - 5, 10, 5, PAL.g);
+      px(x + w / 2 - 1, top + 2, 2, 1, PAL.k);
+      px(x + 4, top + 4, 7, 2, PAL.m); // keyboard
+      px(x + w - 9, top + 3, 4, 3, '#C9C5BC'); // a mug
+      return;
+    }
+    // Plant.
+    px(x, y - 4, w, 5, PAL.k); // pot
+    px(x + 1, y - 13, 1, 9, PAL.g);
+    px(x + 3, y - 14, 1, 10, PAL.g);
+    px(x + 4, y - 11, 1, 7, PAL.g);
+    px(x, y - 12, 1, 3, PAL.l);
+    px(x + 5, y - 10, 1, 3, PAL.l);
+    px(x + 2, y - 15, 1, 3, PAL.l);
+  }
+
+  private drawDoors() {
+    const c = this.ctx;
+    for (const d of this.doors) {
+      const coming = !!d.queue && Math.floor(this.time * 8) % 2 === 0;
+      if (d.side === 'back') {
+        const half = Math.round(8 * (1 - d.open));
+        c.fillStyle = STEEL;
+        c.fillRect(d.x - 8, FLOOR_TOP - 23, half, 23);
+        c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, half, 23);
+        c.fillStyle = STEEL_HI;
+        if (half > 1) {
+          c.fillRect(d.x - 8, FLOOR_TOP - 23, 1, 23);
+          c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, 1, 23);
+        }
+        c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
+        c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
+      } else {
+        // Side doors: a leaf that swings open into the wall's thickness.
+        const x = d.side === 'left' ? 1 : VIEW_W - SIDE + 1;
+        const leaf = Math.round((SIDE - 2) * (1 - d.open));
+        c.fillStyle = STEEL;
+        c.fillRect(d.side === 'left' ? x : x + (SIDE - 2 - leaf), d.y - 11, leaf, 12);
+        c.fillStyle = coming ? PAL.r : d.queue ? '#2A2A27' : PAL.g;
+        c.fillRect(x + 3, d.y - 15, 2, 2);
+      }
+    }
+  }
+
+  private shadow(x: number, y: number, r: number, z = 0) {
+    const c = this.ctx;
+    const k = Math.max(0.45, 1 - z / 40); // higher things cast smaller, fainter shadows
+    const w = Math.round(r * 2 * k + 2);
+    c.fillStyle = z > 0 ? 'rgba(17,17,17,0.12)' : SHADOW;
+    c.fillRect(Math.round(x - w / 2) + 1, Math.round(y) - 1, w - 2, 1);
+    c.fillRect(Math.round(x - w / 2), Math.round(y), w, 1);
+    c.fillRect(Math.round(x - w / 2) + 1, Math.round(y) + 1, w - 2, 1);
   }
 
   private draw(s: Sprite, x: number, y: number, face: number, flash = false, scale = 1) {
@@ -1185,7 +1073,7 @@ export class Game {
   private render() {
     const c = this.ctx;
     const sp = this.sprites;
-    // Shake shifts the whole building, so paint the uncovered edge first.
+    // Shake shifts the whole room, so paint the uncovered edge first.
     c.fillStyle = PAL.k;
     c.fillRect(0, 0, VIEW_W, VIEW_H);
     c.save();
@@ -1194,49 +1082,77 @@ export class Game {
       c.translate(Math.round(rand(-k, k)), Math.round(rand(-k, k)));
     }
     c.drawImage(this.bg, 0, 0);
-    this.drawLifts();
+    this.drawDoors();
 
+    // Shadows first, all on the floor.
+    for (const e of this.enemies) this.shadow(e.x, e.y, e.r, e.z);
+    for (const k of this.pickups) this.shadow(k.x, k.y, 3, k.z);
+    const p = this.player && !this.player.dead ? this.player : null;
+    if (p) this.shadow(p.x, p.y, 4);
+    for (const b of this.bullets) {
+      c.fillStyle = 'rgba(17,17,17,0.18)';
+      c.fillRect(Math.round(b.x), Math.round(b.y), 1, 1);
+    }
+
+    // Then everything with height, back to front.
+    const items: { y: number; draw: () => void }[] = [];
+    for (const pr of PROPS) items.push({ y: pr.y + pr.h, draw: () => this.drawProp(pr) });
     for (const k of this.pickups) {
       if (k.life < 2 && Math.floor(k.life * 10) % 2) continue;
-      this.draw(k.kind === 'heart' ? sp.heart : sp.bolt, k.x, k.y + Math.sin(this.time * 6) * 0.8, 1);
+      const s = k.kind === 'heart' ? sp.heart : sp.bolt;
+      items.push({ y: k.y, draw: () => this.draw(s, k.x - s.w / 2, k.y - k.z - s.h - Math.sin(this.time * 6), 1) });
     }
-
     for (const e of this.enemies) {
-      const flash = e.flash > 0;
-      const frame = Math.floor(e.t * (e.kind === 'flyer' ? 10 : 8)) % 2;
-      if (e.kind === 'crawler') this.draw(sp.crawler[frame], e.x - 1, e.y - 1, e.dir, flash);
-      else if (e.kind === 'flyer') this.draw(sp.flyer[frame], e.x - 1, e.y - 1, e.dir, flash);
-      else if (e.kind === 'brute') this.draw(sp.brute[frame], e.x - 1, e.y - 1, e.dir, flash);
-      else this.draw(sp.brute[frame], e.x - 2, e.y - 2, e.dir, flash, 2);
+      items.push({
+        y: e.y,
+        draw: () => {
+          const flash = e.flash > 0 || (e.wind > 0 && Math.floor(e.t * 20) % 2 === 0);
+          const frame = Math.floor(e.t * (e.kind === 'flyer' ? 10 : 8)) % 2;
+          const s = e.kind === 'crawler' ? sp.crawler[frame] : e.kind === 'flyer' ? sp.flyer[frame] : sp.brute[frame];
+          const scale = e.kind === 'boss' ? 2 : 1;
+          this.draw(s, e.x - (s.w * scale) / 2, e.y - e.z - s.h * scale + 1, e.dir, flash, scale);
+        },
+      });
     }
-
-    const p = this.player;
-    if (p && !p.dead && !(p.inv > 0 && Math.floor(p.inv * 14) % 2)) {
-      const b = sp.bot;
-      const s = !p.ground ? b.jump : Math.abs(p.vx) > 8 ? (Math.floor(p.anim / 6) % 2 ? b.runA : b.runB) : b.idle;
-      this.draw(s, p.x - 1, p.y - 1, p.face);
-      // The gun follows the aim.
-      const aim = this.aimDir(p);
-      const gx = p.x + p.w / 2;
-      const gy = p.y + 7;
-      c.fillStyle = PAL.k;
-      for (let d = 2; d <= 5; d++) c.fillRect(Math.round(gx + aim.x * d), Math.round(gy + aim.y * d), 1, 1);
-      if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
-        c.fillStyle = PAL.y;
-        c.fillRect(Math.round(p.x + 2), Math.round(p.y - 4), 2, 1);
-      }
+    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) {
+      items.push({
+        y: p.y,
+        draw: () => {
+          const b = sp.bot;
+          const moving = Math.hypot(p.vx, p.vy) > 10;
+          const step = Math.floor(p.anim / 7) % 2;
+          const s = p.back ? (moving ? (step ? b.backA : b.backB) : b.back) : moving ? (step ? b.runA : b.runB) : b.idle;
+          const aim = this.aimDir(p);
+          const g = this.gun(p);
+          const gun = () => {
+            c.fillStyle = PAL.k;
+            for (let d = 2; d <= 6; d++) c.fillRect(Math.round(g.x + aim.x * d), Math.round(g.y + aim.y * d), 1, 1);
+          };
+          if (p.back) gun(); // held in front, so behind the robot when facing away
+          this.draw(s, p.x - s.w / 2, p.y - s.h + 1, p.face);
+          if (!p.back) gun();
+          if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
+            c.fillStyle = PAL.y;
+            c.fillRect(Math.round(p.x - 1), Math.round(p.y - s.h - 3), 2, 1);
+          }
+        },
+      });
     }
+    items.sort((a, b) => a.y - b.y);
+    for (const it of items) it.draw();
 
+    // Shots and sparks on top.
     for (const b of this.bullets) {
+      const sy = b.y - GUN_Z;
       c.fillStyle = PAL.r;
-      c.fillRect(Math.round(b.x - 1), Math.round(b.y - 1), 2, 2);
+      c.fillRect(Math.round(b.x - 1), Math.round(sy - 1), 2, 2);
       c.fillStyle = PAL.y;
-      c.fillRect(Math.round(b.x - b.vx / BULLET * 2), Math.round(b.y - b.vy / BULLET * 2), 1, 1); // trail
+      c.fillRect(Math.round(b.x - (b.vx / BULLET) * 2), Math.round(sy - (b.vy / BULLET) * 2), 1, 1);
     }
     for (const q of this.particles) {
       c.globalAlpha = Math.min(1, (q.life / q.max) * 1.5);
       c.fillStyle = q.color;
-      c.fillRect(Math.round(q.x), Math.round(q.y), 1, 1);
+      c.fillRect(Math.round(q.x), Math.round(q.y - q.z), 1, 1);
     }
     c.globalAlpha = 1;
     for (const pop of this.pops) drawText(c, pop.text, pop.x, pop.y, pop.life > 0.2 || Math.floor(pop.life * 20) % 2 ? PAL.k : PAL.r);

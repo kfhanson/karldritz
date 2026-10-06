@@ -61,6 +61,8 @@ const BOT_TOP = [
   '.kgggggk',
   '..kkkkk.',
 ];
+// Seen from behind (aiming up the room): no face.
+const BOT_BACK = BOT_TOP.map((row, i) => (i === 3 ? '.kcccck.' : i === 4 ? '.kcccck.' : row));
 const LEGS = {
   idle: ['..k..k..', '.kk..kk.'],
   runA: ['.k....k.', 'kk....kk'],
@@ -124,6 +126,9 @@ export function buildSprites() {
       runA: sprite([...BOT_TOP, ...LEGS.runA]),
       runB: sprite([...BOT_TOP, ...LEGS.runB]),
       jump: sprite([...BOT_TOP, ...LEGS.jump]),
+      back: sprite([...BOT_BACK, ...LEGS.idle]),
+      backA: sprite([...BOT_BACK, ...LEGS.runA]),
+      backB: sprite([...BOT_BACK, ...LEGS.runB]),
     },
     crawler: [sprite([...CRAWLER, CRAWLER_LEGS[0]]), sprite([...CRAWLER, CRAWLER_LEGS[1]])],
     flyer: [sprite(FLYER_UP), sprite(FLYER_DOWN)],
