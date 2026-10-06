@@ -514,6 +514,7 @@ function prepare() {
 export function warm() {
   arcadeModule ??= import('./arcade');
   import('./snapshot');
+  import('./shards3d');
 }
 
 // Run after the next frame is on screen. The first sound builds the audio
@@ -604,12 +605,21 @@ export async function shatter(at: Pt): Promise<void> {
   drawCracks(sc, 0, true);
   sc.restore();
 
-  const shards = cut(snap, sx);
+  // Prefer real 3D; without WebGL, the flat 2D fall.
+  const { create3D } = await import('./shards3d');
+  const scene = create3D(layer!, snap, web!.cells, web!.o, web!.R);
+  const shards = scene ? [] : cut(snap, sx);
+  if (scene) scene.rest();
   wipe(ctx!);
   const arcade = openArcade({ fade: false });
   burst(0.9, 3000, 0.5);
   for (let k = 0; k < 6; k++) tone(rand(2200, 4200), rand(1800, 3000), 0.12, 0.04, 'sine', 0.05 + k * 0.07);
-  await fall(shards);
+  if (scene) {
+    flash();
+    await scene.fall();
+  } else {
+    await fall(shards);
+  }
   layer!.style.pointerEvents = 'none';
 
   await arcade.exit;
@@ -617,7 +627,7 @@ export async function shatter(at: Pt): Promise<void> {
   if (sameView && !reduceMotion()) {
     layer!.style.pointerEvents = 'auto';
     tone(600, 1400, 0.5, 0.06, 'sine');
-    await rise(shards);
+    await (scene ? scene.rise() : rise(shards));
     await arcade.destroy(false);
     layer!.style.transition = 'opacity 0.5s ease';
     layer!.style.opacity = '0';
@@ -625,11 +635,30 @@ export async function shatter(at: Pt): Promise<void> {
   } else {
     await arcade.destroy(true);
   }
+  scene?.destroy();
   removeLayer();
   brand?.focus();
 }
 
-// Cut the snapshot into the web's cells.
+// A burst of light at the point of impact as the glass gives.
+function flash() {
+  const c = ctx!;
+  const { o } = web!;
+  const start = performance.now();
+  const frame = (now: number) => {
+    const t = Math.max(0, now - start);
+    wipe(c);
+    if (t >= 140) return;
+    c.fillStyle = `rgba(255,255,255,${0.8 * (1 - t / 140)})`;
+    c.beginPath();
+    c.arc(o.x, o.y, 60 + t * 2, 0, TAU);
+    c.fill();
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+// Cut the snapshot into the web's cells (for the 2D fallback).
 function cut(snap: HTMLCanvasElement, sx: number): Shard[] {
   const { o, R, cells } = web!;
   const shards: Shard[] = [];
