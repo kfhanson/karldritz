@@ -226,13 +226,15 @@
    in device pixels (--fit-w, set by script), so the game can be drawn at its
    real size and enlarged by the browser with perfectly even pixels. */
 .ea-sizer {
-  width: min(100%, calc((100dvh - 7rem) * 320 / 184));
+  /* A touch under the full room, and capped: every screen pixel of the frame
+     is composited each frame, so bigger isn't free. */
+  width: min(100%, calc((100dvh - 7rem) * 320 / 184 * 0.88), 1120px);
   height: 0;
   margin: 0 auto;
 }
 .ea-frame {
   position: relative;
-  width: var(--fit-w, min(100%, calc((100dvh - 7rem) * 320 / 184)));
+  width: var(--fit-w, min(100%, calc((100dvh - 7rem) * 320 / 184 * 0.88), 1120px));
   min-width: min(100%, 320px);
   aspect-ratio: 320 / 184;
   margin: 0 auto;
@@ -372,7 +374,7 @@
   font-size: clamp(2rem, 7vw, 4.5rem);
   letter-spacing: -0.02em;
   color: var(--a-ink);
-  text-shadow: 0 0 18px var(--a-canvas), 0 0 4px var(--a-canvas);
+  text-shadow: 0 0 3px var(--a-canvas), 0 0 1px var(--a-canvas); /* a big blur is costly to redraw as it animates */
 }
 .ea-banner span {
   margin-top: 0.4rem;
@@ -381,7 +383,7 @@
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--a-rust);
-  text-shadow: 0 0 8px var(--a-canvas);
+  text-shadow: 0 0 2px var(--a-canvas);
 }
 .ea-banner.is-on {
   animation: ea-banner 1.7s cubic-bezier(0.22, 1, 0.36, 1) both;
