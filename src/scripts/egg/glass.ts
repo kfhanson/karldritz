@@ -161,6 +161,7 @@ function removeLayer() {
   hits = 0;
   shattered = false;
   snapshot = null;
+  warming = null; // the contexts were used up; a next time makes new ones
   Object.assign(reach, { from: 0, to: 0, creepTo: 0 });
 }
 
@@ -509,28 +510,64 @@ async function capture(): Promise<HTMLCanvasElement | null> {
   return shoot(Math.min(window.devicePixelRatio || 1, 1.5)); // matches the 3D canvases; less to upload
 }
 
-function prepare() {
+// The snapshot (and the GL contexts after it) wait for the page to settle:
+// not mid-navigation, not mid-intro. Otherwise they'd fight the page load for
+// the GPU, and the picture could catch the intro half-faded.
+let settleAt = 0;
+let prepTimer: ReturnType<typeof setTimeout> | undefined;
+
+function prepare(force = false) {
   arcadeModule ??= import('./arcade');
+  clearTimeout(prepTimer);
+  const wait = settleAt - performance.now();
+  if (!force && wait > 0) {
+    if (Number.isFinite(wait)) prepTimer = setTimeout(() => prepare(), wait);
+    return;
+  }
   const moved = snapAt.x !== scrollX || snapAt.y !== scrollY || snapAt.w !== innerWidth || snapAt.h !== innerHeight;
   if (snapshot && !moved) return;
   snapAt = { x: scrollX, y: scrollY, w: innerWidth, h: innerHeight };
-  snapshot = capture().catch((err) => {
+  const shot = capture().catch((err) => {
     console.warn('[egg] snapshot failed', err);
     return null;
   });
+  snapshot = shot;
+  shot.then(() => warmGL());
+}
+
+/** The page is changing (Infinity) or will be still from time `t`; any snapshot is stale. */
+export function settle(t: number) {
+  settleAt = t;
+  snapshot = null;
+  snapAt = { x: -1, y: -1, w: 0, h: 0 };
+  if (Number.isFinite(t) && (web || layer)) prepare();
+}
+
+// One slow job per frame: each WebGL context gets its own.
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+let warming: Promise<void> | null = null;
+function warmGL() {
+  if (reduceMotion() || warming) return;
+  warming = (async () => {
+    const fall = await import('./shards3d');
+    await nextFrame();
+    fall.prewarm3D();
+    const menu = await import('./shardmenu');
+    await nextFrame();
+    menu.prewarmMenu();
+  })();
 }
 
 // ── Public: hits ──
 /** Second click: nothing to see yet, but get the expensive bits going. */
-export function warm() {
+export function warm(settled: number) {
   arcadeModule ??= import('./arcade');
   import('./snapshot');
   import('./shards3d');
-  // Everything slow happens now, before the first crack is on screen: the
-  // page snapshot, then the two WebGL contexts.
-  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 30));
-  idle(() => prepare(), { timeout: 300 });
-  prewarmGL();
+  // The slow work starts as soon as the page is still — ideally before the
+  // first crack: the snapshot, then the two WebGL contexts.
+  settleAt = Math.max(settleAt === Infinity ? 0 : settleAt, settled);
+  prepare();
 }
 
 // Run after the next frame is on screen. The first sound builds the audio
@@ -555,18 +592,8 @@ export function crack(hit: number, at: Pt) {
   shake(2 + hit * 1.2, 240);
   burst(0.09 + hit * 0.03, 2400 - hit * 250, 0.35 + hit * 0.08);
   tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
-  afterPaint(prepare, 80); // no-op unless the view moved since the warm-up
-  prewarmGL(); // likewise, if the warm-up already made them
+  afterPaint(() => prepare(), 80); // no-op unless the view moved since the warm-up
   if (hit === 1) pin(true);
-}
-
-// Make the WebGL contexts for the break and the menu now, in quiet moments
-// between hits, rather than all at once when the glass gives.
-function prewarmGL() {
-  if (reduceMotion()) return;
-  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 120));
-  idle(() => import('./shards3d').then((m) => m.prewarm3D()), { timeout: 600 });
-  idle(() => import('./shardmenu').then((m) => m.prewarmMenu()), { timeout: 1200 });
 }
 
 /** Let the glass mend, tips first. Resolves true once it's gone, false if struck again first. */
@@ -589,7 +616,7 @@ export async function shatter(at: Pt): Promise<void> {
     healing = null;
     h(false);
   }
-  prepare();
+  prepare(true); // breaking now: no more waiting for the page to settle
   const arcadeLoad = (arcadeModule ??= import('./arcade'));
 
   // The last hit sends the crack across the whole screen — every line the

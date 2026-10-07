@@ -1,13 +1,13 @@
 // Tiny synth shared by the glass and the game. Everything is generated — no
 // audio files to download.
 //
-// Sounds are rendered with an OfflineAudioContext and played through plain
-// <audio> elements. A live AudioContext would be simpler, but the first one on
-// a page opens the audio device and blocks the main thread for most of a
-// second (measured ~750ms in Chrome on macOS) — right as the glass cracks.
-// Offline rendering takes a few ms off the main thread, and <audio> playback
-// runs in the browser's media pipeline. Each distinct sound is rendered once
-// and cached as a small WAV.
+// Two ways to play, because browsers disagree about which is cheap:
+// - Chromium: the first live AudioContext on a page opens the audio device and
+//   blocks the main thread for ~750ms (measured on macOS), right as the glass
+//   cracks. There, sounds are rendered once with an OfflineAudioContext and
+//   played through <audio> elements, which Chromium starts in ~1ms.
+// - Safari (and others): an AudioContext starts in a few ms, but each <audio>
+//   play costs 100ms+. There, a live context synthesises everything directly.
 
 const RATE = 22050;
 const MASTER = 0.22;
@@ -23,6 +23,25 @@ let muted = (() => {
 const rendered = new Map<string, Promise<string | null>>();
 const pools = new Map<string, HTMLAudioElement[]>();
 const supported = typeof OfflineAudioContext !== 'undefined';
+// userAgentData only exists in Chromium.
+const baked = !!(navigator as unknown as { userAgentData?: { brands?: { brand: string }[] } }).userAgentData?.brands?.some((b) =>
+  /Chromium/.test(b.brand),
+);
+
+let live: AudioContext | null = null;
+let liveOut: GainNode | null = null;
+function liveCtx(): AudioContext | null {
+  if (!live) {
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return null;
+    live = new AC();
+    liveOut = live.createGain();
+    liveOut.gain.value = MASTER;
+    liveOut.connect(live.destination);
+  }
+  if (live.state === 'suspended') live.resume().catch(() => {});
+  return live;
+}
 
 export const isMuted = () => muted;
 
@@ -32,6 +51,7 @@ export function setMuted(value: boolean) {
     localStorage.setItem('egg-muted', value ? '1' : '0');
   } catch {}
   if (value) for (const pool of pools.values()) for (const a of pool) a.pause();
+  if (liveOut) liveOut.gain.value = value ? 0 : MASTER;
 }
 
 function wav(buf: AudioBuffer): string {
@@ -62,14 +82,14 @@ function wav(buf: AudioBuffer): string {
   return `data:audio/wav;base64,${btoa(bin)}`;
 }
 
-function render(key: string, dur: number, build: (ac: OfflineAudioContext, out: GainNode) => void): Promise<string | null> {
+function render(key: string, dur: number, build: (ac: BaseAudioContext, out: GainNode, t0: number) => void): Promise<string | null> {
   let p = rendered.get(key);
   if (!p) {
     const ac = new OfflineAudioContext(1, Math.max(1, Math.ceil((dur + 0.03) * RATE)), RATE);
     const out = ac.createGain();
     out.gain.value = MASTER;
     out.connect(ac.destination);
-    build(ac, out);
+    build(ac, out, 0);
     p = ac.startRendering().then(wav, () => null);
     rendered.set(key, p);
   }
@@ -88,8 +108,16 @@ function play(url: string) {
   a.play().catch(() => {});
 }
 
-function fire(key: string, dur: number, delay: number, build: (ac: OfflineAudioContext, out: GainNode) => void) {
-  if (muted || !supported) return;
+type Build = (ac: BaseAudioContext, out: GainNode, t0: number) => void;
+
+function fire(key: string, dur: number, delay: number, build: Build) {
+  if (muted) return;
+  if (!baked) {
+    const ac = liveCtx();
+    if (ac && liveOut) build(ac, liveOut, ac.currentTime + delay);
+    return;
+  }
+  if (!supported) return;
   const at = performance.now() + delay * 1000;
   render(key, dur, build).then((url) => {
     if (!url || muted) return;
@@ -106,7 +134,7 @@ const NYQUIST = RATE / 2 - 100;
 /** Filtered noise burst — cracks, hits, explosions. */
 export function burst(dur: number, freq: number, gain = 0.6, type: BiquadFilterType = 'highpass') {
   const f = Math.min(q(freq), NYQUIST);
-  fire(`b|${dur}|${f}|${gain}|${type}`, dur, 0, (ac, out) => {
+  fire(`b|${dur}|${f}|${gain}|${type}`, dur, 0, (ac, out, t) => {
     const buf = ac.createBuffer(1, Math.ceil(dur * RATE) + 1, RATE);
     const d = buf.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -116,10 +144,10 @@ export function burst(dur: number, freq: number, gain = 0.6, type: BiquadFilterT
     filter.type = type;
     filter.frequency.value = f;
     const g = ac.createGain();
-    g.gain.setValueAtTime(gain, 0);
-    g.gain.exponentialRampToValueAtTime(0.001, dur);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(filter).connect(g).connect(out);
-    src.start(0);
+    src.start(t);
   });
 }
 
@@ -127,16 +155,16 @@ export function burst(dur: number, freq: number, gain = 0.6, type: BiquadFilterT
 export function tone(from: number, to: number, dur: number, gain = 0.25, type: OscillatorType = 'square', delay = 0) {
   const a = Math.min(Math.max(20, q(from)), NYQUIST);
   const b = Math.min(Math.max(20, q(to)), NYQUIST);
-  fire(`t|${a}|${b}|${dur}|${gain}|${type}`, dur, delay, (ac, out) => {
+  fire(`t|${a}|${b}|${dur}|${gain}|${type}`, dur, delay, (ac, out, t) => {
     const osc = ac.createOscillator();
     osc.type = type;
-    osc.frequency.setValueAtTime(a, 0);
-    osc.frequency.exponentialRampToValueAtTime(b, dur);
+    osc.frequency.setValueAtTime(a, t);
+    osc.frequency.exponentialRampToValueAtTime(b, t + dur);
     const g = ac.createGain();
-    g.gain.setValueAtTime(gain, 0);
-    g.gain.exponentialRampToValueAtTime(0.001, dur);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     osc.connect(g).connect(out);
-    osc.start(0);
-    osc.stop(dur + 0.02);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
   });
 }

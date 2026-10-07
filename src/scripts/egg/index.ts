@@ -16,6 +16,12 @@ let impact: { x: number; y: number } | null = null;
 let healTimer: ReturnType<typeof setTimeout> | undefined;
 let broken = false; // shattered, or the arcade is open
 
+// When the page will be still enough to photograph: after a navigation has
+// landed, and after a fresh load's intro has played (performance.now() counts
+// from the load).
+const INTRO_MS = 2700;
+let settled = INTRO_MS;
+
 const loadGlass = () => (glass ??= import('./glass'));
 
 function onClick(e: MouseEvent) {
@@ -52,7 +58,7 @@ function onClick(e: MouseEvent) {
   e.preventDefault();
 
   if (streak === 2) {
-    loadGlass().then((g) => g.warm());
+    loadGlass().then((g) => g.warm(settled));
     return;
   }
 
@@ -89,4 +95,13 @@ function onClick(e: MouseEvent) {
 export function initEasterEgg() {
   // Capture phase, so this runs before Astro's router decides to navigate.
   document.addEventListener('click', onClick, true);
+  // A streak that starts on another page navigates home first.
+  document.addEventListener('astro:before-preparation', () => {
+    settled = Infinity;
+    glass?.then((g) => g.settle(Infinity));
+  });
+  document.addEventListener('astro:after-swap', () => {
+    settled = performance.now() + 900;
+    glass?.then((g) => g.settle(settled));
+  });
 }
