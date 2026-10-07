@@ -55,6 +55,7 @@ const TEMPLATE = `
     </header>
 
     <div class="ea-stage">
+      <div class="ea-sizer" aria-hidden="true"></div>
       <div class="ea-frame" tabindex="-1">
         <canvas class="ea-canvas" aria-label="Bug Hunt game"></canvas>
         <div class="ea-banner" data-banner aria-live="polite"><p data-banner-title></p><span data-banner-sub></span></div>
@@ -205,6 +206,9 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       setTimeout(() => game.mode === 'over' && show('over'), 200);
     },
   });
+
+  // Dev only (stripped from builds): lets test scripts drive the game.
+  if (import.meta.env.DEV) (window as unknown as { __eggGame?: Game }).__eggGame = game;
 
   const hearts = $('[data-hearts]');
   let heartCount = -1;
@@ -509,11 +513,22 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
 
   // Crisp pixels: render at an integer multiple of the game resolution that's
   // closest to the frame's device-pixel width.
+  // The game draws at its own 320×184; the browser enlarges it. Where it costs
+  // little room, snap the frame to a whole multiple of that in device pixels
+  // so every art pixel comes out the same size. (Drawing it pre-enlarged
+  // instead repainted millions of pixels a frame for no visible gain.)
+  game.resize(1);
+  const sizer = $('.ea-sizer');
   const ro = new ResizeObserver(() => {
-    const k = Math.max(1, Math.round((frame.clientWidth * (window.devicePixelRatio || 1)) / VIEW_W));
-    game.resize(k);
+    const dpr = window.devicePixelRatio || 1;
+    const avail = sizer.clientWidth;
+    const k = Math.max(1, Math.floor((avail * dpr) / VIEW_W));
+    const snapped = (k * VIEW_W) / dpr;
+    // Snapping can cost up to one step of size; past 8% the room matters more
+    // than perfectly even pixels (on sharp screens the unevenness is hard to see).
+    frame.style.setProperty('--fit-w', `${snapped >= avail * 0.92 ? snapped : avail}px`);
   });
-  ro.observe(frame);
+  ro.observe(sizer);
 
   // The shards must be in place on the very frame the page breaks, so the
   // menu opens now; the rest of the arcade rises in on the next frame.

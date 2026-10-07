@@ -221,10 +221,18 @@
   display: none;
 }
 
+/* The sizer is the room the window allows (the header, hint line and padding
+   take ~7rem). The frame then snaps down to a whole multiple of the 320px art
+   in device pixels (--fit-w, set by script), so the game can be drawn at its
+   real size and enlarged by the browser with perfectly even pixels. */
+.ea-sizer {
+  width: min(100%, calc((100dvh - 7rem) * 320 / 184));
+  height: 0;
+  margin: 0 auto;
+}
 .ea-frame {
   position: relative;
-  /* As big as the window allows: the header, hint line and padding take ~7rem. */
-  width: min(100%, calc((100dvh - 7rem) * 320 / 184));
+  width: var(--fit-w, min(100%, calc((100dvh - 7rem) * 320 / 184)));
   min-width: min(100%, 320px);
   aspect-ratio: 320 / 184;
   margin: 0 auto;
@@ -686,7 +694,7 @@
     padding-top: 0.4rem;
     justify-content: flex-start;
   }
-  .ea-frame {
+  .ea-sizer {
     width: min(100%, calc((100dvh - 4.6rem) * 320 / 184));
   }
   .ea-chip[data-mute] {

@@ -127,6 +127,19 @@ function fire(key: string, dur: number, delay: number, build: Build) {
   });
 }
 
+// One second of noise per context, shared by every burst.
+const noise = new WeakMap<BaseAudioContext, AudioBuffer>();
+function noiseFor(ac: BaseAudioContext): AudioBuffer {
+  let b = noise.get(ac);
+  if (!b) {
+    b = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    noise.set(ac, b);
+  }
+  return b;
+}
+
 // Quantised so random pitches share a handful of renders.
 const q = (f: number) => Math.round(f / 20) * 20;
 const NYQUIST = RATE / 2 - 100;
@@ -135,11 +148,8 @@ const NYQUIST = RATE / 2 - 100;
 export function burst(dur: number, freq: number, gain = 0.6, type: BiquadFilterType = 'highpass') {
   const f = Math.min(q(freq), NYQUIST);
   fire(`b|${dur}|${f}|${gain}|${type}`, dur, 0, (ac, out, t) => {
-    const buf = ac.createBuffer(1, Math.ceil(dur * RATE) + 1, RATE);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     const src = ac.createBufferSource();
-    src.buffer = buf;
+    src.buffer = noiseFor(ac);
     const filter = ac.createBiquadFilter();
     filter.type = type;
     filter.frequency.value = f;
@@ -147,7 +157,8 @@ export function burst(dur: number, freq: number, gain = 0.6, type: BiquadFilterT
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     src.connect(filter).connect(g).connect(out);
-    src.start(t);
+    src.onended = () => g.disconnect(); // a live graph keeps connected nodes alive
+    src.start(t, 0, dur);
   });
 }
 
@@ -164,6 +175,7 @@ export function tone(from: number, to: number, dur: number, gain = 0.25, type: O
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     osc.connect(g).connect(out);
+    osc.onended = () => g.disconnect();
     osc.start(t);
     osc.stop(t + dur + 0.02);
   });
