@@ -7,7 +7,7 @@
 // Every shard is built from wedge fragments that tile it exactly, so the same
 // geometry can fly apart; at rest it's drawn in one piece.
 import { burst, tone } from './audio';
-import { fit, perspective, prewarmKit, takeKit } from './shards3d';
+import { fit, inscribed, perspective, prewarmKit, takeKit } from './shards3d';
 
 type Pt = { x: number; y: number };
 
@@ -228,21 +228,6 @@ function centroid(p: Pt[]): Pt {
 
 const turn = (p: Pt, a: number): Pt => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) });
 
-/** The rotation that lays a shard's long axis flat, and its size that way. */
-function lieFlat(world: Pt[]) {
-  let best = { a: 0, w: 1, h: 1, ratio: 0 };
-  for (let k = 0; k < 72; k++) {
-    const a = (k / 72) * Math.PI;
-    const r = world.map((p) => turn(p, a));
-    const xs = r.map((p) => p.x);
-    const ys = r.map((p) => p.y);
-    const w = Math.max(...xs) - Math.min(...xs);
-    const h = Math.max(...ys) - Math.min(...ys);
-    if (w / h > best.ratio) best = { a, w, h, ratio: w / h };
-  }
-  return best;
-}
-
 /** A broken-glass outline around a w×h label, for when there's no page to cut from. */
 function outline(w: number, h: number): Pt[] {
   const hw = w / 2;
@@ -421,6 +406,12 @@ export function createShardMenu(
   const push = (p: Pt, z: number, nx: number, ny: number, nz: number, pu: number, pv: number, lu: number, lv: number, kind: number, edge: number) =>
     data.push(p.x, p.y, z, nx, ny, nz, pu, pv, lu, lv, kind, edge);
 
+  // Label type size on screen, and how big a shard may get.
+  const fsPx = Math.round(Math.min(26, Math.max(15, frame0.width * 0.021)));
+  const maxShardW = Math.min(frame0.width * 0.62, 470);
+  const maxShardH = frame0.height * 0.3;
+  const meas = document.createElement('canvas').getContext('2d')!;
+
   const shards: Shard[] = items.map((item, i) => {
     // Outline: a real cut from the page, or a made-up one.
     const screen = source?.polys[i];
@@ -435,18 +426,32 @@ export function createShardMenu(
       rest = { x: 0, y: -H, z: 0, rx: 0, ry: 0, rz: 0, s: 1, mix: 1 };
     }
     if (areaOf(local) < 0) local.reverse();
-    const lay = lieFlat(local);
-    const flat = lay.a; // world rotation that levels it (turn() is the same rotation)
-    const size = Math.min(btnW / lay.w, (btnH * 1.35) / lay.h);
-    const level = local.map((p) => turn(p, lay.a)); // as it hangs, before scaling
+
+    // Size the shard around its label: measure the label at its intended size,
+    // find the biggest box of that shape inside the shard, and scale the shard
+    // until that box holds the label. Then the words can't run off the glass.
+    const hint = touch ? undefined : item.hint;
+    meas.font = `400 ${fsPx}px Fraunces, Georgia, serif`;
+    const textW = meas.measureText(item.label).width;
+    meas.font = `500 9px "JetBrains Mono", monospace`;
+    const hintW = hint ? meas.measureText(hint.toUpperCase()).width + 8 : 0;
+    const needW = textW + hintW + fsPx * 1.5;
+    const needH = fsPx * 2;
+    const box = inscribed(local, needW / needH, 24);
+    const flat = box.angle; // world rotation that levels the box (turn() is the same rotation)
+    const level = local.map((p) => turn(p, box.angle)); // as it hangs, before scaling
+    let size = needW / Math.max(1, box.w);
     const xs = level.map((p) => p.x);
     const ys = level.map((p) => p.y);
     const bx0 = Math.min(...xs);
     const by1 = Math.max(...ys);
     const lw = Math.max(...xs) - bx0;
     const lh = by1 - Math.min(...ys);
+    // Not so big it swamps the room; if capped, the label shrinks with it.
+    size = Math.min(size, maxShardW / lw, maxShardH / lh);
+    const shrink = Math.min(1, (box.w * size) / needW);
     const labelUv = (p: Pt) => {
-      const q = turn(p, lay.a);
+      const q = turn(p, box.angle);
       return [(q.x - bx0) / lw, (by1 - q.y) / lh];
     };
     const pageUv = (p: Pt) => [(rest.x + p.x + W / 2 - crop.x) / crop.w, (H / 2 - (rest.y + p.y) - crop.y) / crop.h];
@@ -504,30 +509,17 @@ export function createShardMenu(
     tc.height = Math.max(2, Math.ceil(lh * k));
     const g = tc.getContext('2d')!;
     g.scale(k, k);
-    // Where the label sits: the run across the middle of the level outline.
-    const midY = by1 - lh / 2;
-    const run: number[] = [];
-    level.forEach((p, n) => {
-      const q = level[(n + 1) % level.length];
-      if ((p.y - midY) * (q.y - midY) <= 0 && p.y !== q.y) run.push(p.x + ((midY - p.y) * (q.x - p.x)) / (q.y - p.y));
-    });
-    const left = (run.length ? Math.min(...run) : bx0) - bx0;
-    const right = (run.length ? Math.max(...run) : bx0 + lw) - bx0;
-    const hint = touch ? undefined : item.hint;
-    const hintFont = `500 ${9 / size}px "JetBrains Mono", monospace`;
-    g.font = hintFont;
-    const hintW = hint ? g.measureText(hint.toUpperCase()).width + 8 / size : 0;
-    const room = (right - left) * 0.84 - hintW;
-    let fs = Math.min(btnH * 0.4, lh * size * 0.5) / size;
-    const font = () => `400 ${fs}px Fraunces, Georgia, serif`;
-    g.font = font();
-    while (fs * size > 9 && g.measureText(item.label).width > room) {
-      fs *= 0.95;
-      g.font = font();
-    }
+    // The label sits in the fitted box: its centre, in canvas space (y down).
+    const fs = (fsPx * shrink) / size;
+    const hintFont = `500 ${(9 * shrink) / size}px "JetBrains Mono", monospace`;
+    g.font = `400 ${fs}px Fraunces, Georgia, serif`;
     const labelW = g.measureText(item.label).width;
-    const x0 = (left + right) / 2 - (labelW + hintW) / 2;
-    const cy = lh / 2 + fs * 0.05;
+    g.font = hintFont;
+    const gapW = hint ? (8 * shrink) / size : 0;
+    const hintWc = hint ? g.measureText(hint.toUpperCase()).width : 0;
+    const x0 = box.cx - bx0 - (labelW + gapW + hintWc) / 2;
+    const cy = by1 - box.cy + fs * 0.05;
+    g.font = `400 ${fs}px Fraunces, Georgia, serif`;
     g.textBaseline = 'middle';
     g.textAlign = 'left';
     // A faint light halo keeps the letters clear over dark things behind.
@@ -538,7 +530,7 @@ export function createShardMenu(
     if (hint) {
       g.font = hintFont;
       g.fillStyle = 'rgba(17,17,17,0.55)';
-      g.fillText(hint.toUpperCase(), x0 + labelW + 8 / size, cy);
+      g.fillText(hint.toUpperCase(), x0 + labelW + gapW, cy);
     }
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     const label = makeTex(1);

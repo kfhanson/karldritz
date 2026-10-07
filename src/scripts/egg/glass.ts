@@ -659,8 +659,8 @@ export async function shatter(at: Pt): Promise<void> {
 
   // Prefer real 3D; without WebGL, the flat 2D fall. Three good shards stay
   // behind to become the menu.
-  const { create3D, clipToView } = await import('./shards3d');
-  const keep = menuShards(web!.cells, clipToView);
+  const { create3D, clipToView, inscribed } = await import('./shards3d');
+  const keep = menuShards(web!.cells, clipToView, inscribed);
   const scene = create3D(layer!, snap, web!.cells.filter((_, i) => !keep.includes(i)), web!.o, web!.R);
   const shards = scene ? [] : cut(snap, sx);
   if (scene) scene.rest();
@@ -700,27 +700,20 @@ export async function shatter(at: Pt): Promise<void> {
 }
 
 // The menu's shards are real pieces of the page: pick three that make good
-// buttons. Fairly large, solid (filling most of their own box), and longer
-// than tall once laid flat.
-function menuShards(cells: Pt[][], clip: (p: Pt[], w: number, h: number) => Pt[]): number[] {
+// buttons. What matters is how well a label-shaped box fits inside: the box
+// should fill much of the shard (so it isn't mostly jagged spikes) and be big
+// enough that scaling it up to button size doesn't blow it up tenfold.
+function menuShards(cells: Pt[][], clip: (p: Pt[], w: number, h: number) => Pt[], fit: typeof import('./shards3d').inscribed): number[] {
   const scored: { i: number; score: number }[] = [];
   cells.forEach((cell, i) => {
     const poly = clip(cell, innerWidth, innerHeight);
     if (poly.length < 3) return;
     const a = area(poly);
-    if (a < 2500) return;
-    let best = 0;
-    for (let k = 0; k < 36; k++) {
-      const t = (k / 36) * Math.PI;
-      const xs = poly.map((p) => p.x * Math.cos(t) - p.y * Math.sin(t));
-      const ys = poly.map((p) => p.x * Math.sin(t) + p.y * Math.cos(t));
-      const w = Math.max(...xs) - Math.min(...xs);
-      const h = Math.max(...ys) - Math.min(...ys);
-      const solid = a / (w * h);
-      const ratio = w / h;
-      if (solid > 0.45 && ratio > 1.7 && ratio < 6) best = Math.max(best, solid * Math.min(ratio, 3.2));
-    }
-    if (best) scored.push({ i, score: best * Math.sqrt(Math.min(a, 40000)) });
+    if (a < 3000) return;
+    const box = fit(poly, 4, 8);
+    if (box.w < 40) return;
+    const fill = (box.w * box.h) / a;
+    scored.push({ i, score: fill * Math.min(1, box.w / 120) });
   });
   scored.sort((x, y) => y.score - x.score);
   return scored.slice(0, 3).map((s) => s.i);

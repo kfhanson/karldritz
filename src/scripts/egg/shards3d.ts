@@ -162,6 +162,88 @@ function model(out: Float32Array, s: Shard, k = 1) {
   out[15] = 1;
 }
 
+// ── Fitting a label inside a shard ──
+const turnPt = (p: Pt, a: number): Pt => ({ x: p.x * Math.cos(a) - p.y * Math.sin(a), y: p.x * Math.sin(a) + p.y * Math.cos(a) });
+
+function insidePoly(pt: Pt, poly: Pt[]) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > pt.y !== b.y > pt.y && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
+  }
+  return hit;
+}
+
+export interface Fit {
+  angle: number; // turn the polygon by this and the box is axis-aligned
+  cx: number; // box centre, in the turned polygon's coordinates
+  cy: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * The biggest w:h = `aspect` box that fits inside the polygon, trying
+ * `steps` angles. A coarse grid of centres, a binary search on size, then a
+ * finer pass around the best centre.
+ */
+export function inscribed(poly: Pt[], aspect: number, steps = 12): Fit {
+  let best: Fit = { angle: 0, cx: 0, cy: 0, w: 0, h: 0 };
+  const fits = (r: Pt[], cx: number, cy: number, hw: number) => {
+    const hh = hw / aspect;
+    return (
+      insidePoly({ x: cx - hw, y: cy - hh }, r) && insidePoly({ x: cx + hw, y: cy - hh }, r) &&
+      insidePoly({ x: cx + hw, y: cy + hh }, r) && insidePoly({ x: cx - hw, y: cy + hh }, r) &&
+      insidePoly({ x: cx, y: cy - hh }, r) && insidePoly({ x: cx, y: cy + hh }, r) // edge midpoints, for dents
+    );
+  };
+  const grow = (r: Pt[], cx: number, cy: number, max: number) => {
+    if (!insidePoly({ x: cx, y: cy }, r)) return 0;
+    let lo = 0;
+    let hi = max;
+    for (let k = 0; k < 11; k++) {
+      const mid = (lo + hi) / 2;
+      if (fits(r, cx, cy, mid)) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
+  for (let k = 0; k < steps; k++) {
+    const a = (k / steps) * Math.PI;
+    const r = poly.map((p) => turnPt(p, a));
+    const xs = r.map((p) => p.x);
+    const ys = r.map((p) => p.y);
+    const x0 = Math.min(...xs);
+    const y0 = Math.min(...ys);
+    const bw = Math.max(...xs) - x0;
+    const bh = Math.max(...ys) - y0;
+    const max = bw / 2;
+    let local = { cx: 0, cy: 0, hw: 0 };
+    for (let gx = 0; gx < 9; gx++) {
+      for (let gy = 0; gy < 5; gy++) {
+        const cx = x0 + ((gx + 0.5) / 9) * bw;
+        const cy = y0 + ((gy + 0.5) / 5) * bh;
+        const hw = grow(r, cx, cy, max);
+        if (hw > local.hw) local = { cx, cy, hw };
+      }
+    }
+    // Refine around the best centre.
+    const sx = bw / 18;
+    const sy = bh / 10;
+    for (let gx = -2; gx <= 2; gx++) {
+      for (let gy = -2; gy <= 2; gy++) {
+        const cx = local.cx + gx * sx * 0.5;
+        const cy = local.cy + gy * sy * 0.5;
+        const hw = grow(r, cx, cy, max);
+        if (hw > local.hw) local = { cx, cy, hw };
+      }
+    }
+    if (local.hw * 2 > best.w) best = { angle: a, cx: local.cx, cy: local.cy, w: local.hw * 2, h: (local.hw * 2) / aspect };
+  }
+  return best;
+}
+
 // ── Contexts made ahead of time ──
 // Creating a WebGL context and compiling its shaders takes a couple of hundred
 // milliseconds. Done at the moment of the break, that's a visible freeze, so
