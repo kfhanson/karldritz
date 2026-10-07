@@ -130,17 +130,28 @@ export function initShader(canvas: HTMLCanvasElement): (() => void) | null {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   };
 
+  // The easter egg covers the screen with glass while it cracks: no need to
+  // keep animating underneath it, and its frames are better spent on the glass.
+  let held = false;
+
   const render = () => {
     drawFrame();
     animationId = requestAnimationFrame(render);
   };
+
+  const onHold = (e: Event) => {
+    held = (e as CustomEvent<boolean>).detail;
+    cancelAnimationFrame(animationId);
+    if (!held && visible && !prefersReducedMotion) render();
+  };
+  window.addEventListener('egg:hold', onHold);
 
   // Pause rendering while the hero is scrolled out of view.
   const observer = new IntersectionObserver(([entry]) => {
     const nowVisible = entry.isIntersecting;
     if (nowVisible && !visible && !prefersReducedMotion) {
       visible = true;
-      render();
+      if (!held) render();
     } else if (!nowVisible && visible) {
       visible = false;
       cancelAnimationFrame(animationId);
@@ -158,5 +169,6 @@ export function initShader(canvas: HTMLCanvasElement): (() => void) | null {
     cancelAnimationFrame(animationId);
     observer.disconnect();
     window.removeEventListener('resize', resize);
+    window.removeEventListener('egg:hold', onHold);
   };
 }

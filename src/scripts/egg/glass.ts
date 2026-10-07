@@ -151,6 +151,7 @@ function wipe(c: CanvasRenderingContext2D) {
 }
 
 function removeLayer() {
+  pin(false);
   cancelAnimationFrame(raf);
   window.removeEventListener('resize', onResize);
   layer?.remove();
@@ -476,6 +477,16 @@ function animateCracks() {
   raf = requestAnimationFrame(frame);
 }
 
+// While the glass is cracked the page shakes on every hit. Promote it to its
+// own layer once for the whole phase, rather than once per shake.
+function pin(on: boolean) {
+  window.dispatchEvent(new CustomEvent('egg:hold', { detail: on })); // pause the hero animation underneath
+  for (const id of ['main-content', 'site-nav']) {
+    const el = document.getElementById(id);
+    if (el) el.style.willChange = on ? 'transform' : '';
+  }
+}
+
 // A short, decaying tremor through the page and the glass together.
 function shake(strength: number, ms: number) {
   if (reduceMotion()) return;
@@ -515,6 +526,11 @@ export function warm() {
   arcadeModule ??= import('./arcade');
   import('./snapshot');
   import('./shards3d');
+  // Everything slow happens now, before the first crack is on screen: the
+  // page snapshot, then the two WebGL contexts.
+  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 30));
+  idle(() => prepare(), { timeout: 300 });
+  prewarmGL();
 }
 
 // Run after the next frame is on screen. The first sound builds the audio
@@ -537,12 +553,11 @@ export function crack(hit: number, at: Pt) {
   runTo(to, RUN_MS, to + (next - to) * CREEP);
   animateCracks();
   shake(2 + hit * 1.2, 240);
-  afterPaint(() => {
-    burst(0.09 + hit * 0.03, 2400 - hit * 250, 0.35 + hit * 0.08);
-    tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
-  });
-  afterPaint(prepare, 80);
-  if (hit === 1) prewarmGL();
+  burst(0.09 + hit * 0.03, 2400 - hit * 250, 0.35 + hit * 0.08);
+  tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
+  afterPaint(prepare, 80); // no-op unless the view moved since the warm-up
+  prewarmGL(); // likewise, if the warm-up already made them
+  if (hit === 1) pin(true);
 }
 
 // Make the WebGL contexts for the break and the menu now, in quiet moments

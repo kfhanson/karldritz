@@ -104,7 +104,7 @@ function frameOf(el: HTMLCanvasElement | HTMLVideoElement): string | null {
       // A WebGL canvas reads back blank outside its own frame: draw one now.
       const gl = el.getContext('webgl');
       if (gl) gl.drawArrays(gl.TRIANGLES, 0, 6);
-      return el.toDataURL();
+      return el.toDataURL('image/jpeg', 0.9); // soft noise: JPEG is fine, and far quicker to encode
     }
     if (el.readyState < 2) return null;
     const c = document.createElement('canvas');
