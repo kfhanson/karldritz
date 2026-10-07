@@ -7,7 +7,7 @@
 // Every shard is built from wedge fragments that tile it exactly, so the same
 // geometry can fly apart; at rest it's drawn in one piece.
 import { burst, tone } from './audio';
-import { compile, perspective } from './shards3d';
+import { fit, perspective, prewarmKit, takeKit } from './shards3d';
 
 type Pt = { x: number; y: number };
 
@@ -84,6 +84,7 @@ precision mediump float;
 uniform sampler2D uPage;
 uniform sampler2D uLabel;
 uniform sampler2D uBack;
+uniform vec4 uFrame; // the game's rect on screen, as uv: x0, y0, x1, y1
 uniform vec2 uRes;
 uniform vec2 uCenter;
 uniform vec3 uLight;
@@ -98,6 +99,13 @@ varying vec3 vNormal;
 varying vec3 vPos;
 varying float vKind;
 varying float vEdge;
+// Behind the glass: the live game inside its frame, the paper everywhere else.
+vec4 backAt(vec2 p) {
+  vec2 f = (p - uFrame.xy) / (uFrame.zw - uFrame.xy);
+  vec4 paper = vec4(0.965, 0.961, 0.945, 1.0);
+  if (f.x < 0.0 || f.y < 0.0 || f.x > 1.0 || f.y > 1.0) return paper;
+  return texture2D(uBack, f);
+}
 void main() {
   if (uShadow > 0.5) {
     gl_FragColor = vec4(0.0, 0.0, 0.0, 0.07 * uAlpha * uMix);
@@ -117,9 +125,9 @@ void main() {
   float rim = 1.0 - smoothstep(0.0, 0.16, vEdge);
   vec2 bend = n.xy * vec2(0.05, -0.05) - (suv - uCenter) * rim * 0.09;
   vec3 seen = vec3(
-    texture2D(uBack, suv + bend * 1.08).r,
-    texture2D(uBack, suv + bend).g,
-    texture2D(uBack, suv + bend * 0.92).b
+    backAt(suv + bend * 1.08).r,
+    backAt(suv + bend).g,
+    backAt(suv + bend * 0.92).b
   );
 
   vec3 glass;
@@ -145,6 +153,7 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const smooth = (p: number) => p * p * (3 - 2 * p);
 const easeInOut = (p: number) => 0.5 - Math.cos(Math.PI * p) / 2;
+const wrap = (a: number) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
 const easeInOutCubic = (p: number) => (p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2);
 
 // ── Column-major 4×4 ──
@@ -295,6 +304,8 @@ interface Shard {
   seed: number;
 }
 
+export const prewarmMenu = () => prewarmKit('menu', VERT, FRAG);
+
 export function createShardMenu(
   host: HTMLElement,
   items: MenuItem[],
@@ -303,23 +314,11 @@ export function createShardMenu(
   onPick: (id: string) => void,
   source?: ShardSource,
 ): ShardMenu | null {
-  const canvas = document.createElement('canvas');
+  const kit = takeKit('menu', VERT, FRAG);
+  if (!kit) return null;
+  const { canvas, gl, program } = kit;
   canvas.className = 'ea-shards';
   canvas.setAttribute('aria-hidden', 'true');
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: true });
-  if (!gl) return null;
-
-  let program: WebGLProgram;
-  try {
-    program = gl.createProgram()!;
-    gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERT));
-    gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'link');
-  } catch (err) {
-    console.warn('[egg] shard menu unavailable', err);
-    return null;
-  }
   gl.useProgram(program);
   host.appendChild(canvas);
 
@@ -353,11 +352,10 @@ export function createShardMenu(
   let H = 0;
   let projM = ident();
   const size = () => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5); // full-screen and antialiased: keep it light
     W = innerWidth;
     H = innerHeight;
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
+    fit(canvas, Math.round(W * dpr), Math.round(H * dpr));
     gl.viewport(0, 0, canvas.width, canvas.height);
     const D = H / 2 / Math.tan(FOV / 2);
     const proj = perspective(FOV, W / H, 10, D * 4);
@@ -371,28 +369,43 @@ export function createShardMenu(
   size();
 
   // ── Textures: the page (unit 0), each label (unit 1), the backdrop (unit 2) ──
+  // Only the patch of page under these shards: a crop, not the whole snapshot.
   makeTex(0);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  if (source) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source.snap);
-  else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 245, 241, 255]));
+  const crop = { x: 0, y: 0, w: 1, h: 1 }; // in CSS px
+  if (source) {
+    const all = source.polys.flat();
+    crop.x = Math.max(0, Math.floor(Math.min(...all.map((p) => p.x))));
+    crop.y = Math.max(0, Math.floor(Math.min(...all.map((p) => p.y))));
+    crop.w = Math.min(innerWidth, Math.ceil(Math.max(...all.map((p) => p.x)))) - crop.x || 1;
+    crop.h = Math.min(innerHeight, Math.ceil(Math.max(...all.map((p) => p.y)))) - crop.y || 1;
+    const k = source.snap.width / innerWidth;
+    const pc = document.createElement('canvas');
+    pc.width = Math.max(1, Math.round(crop.w * k));
+    pc.height = Math.max(1, Math.round(crop.h * k));
+    pc.getContext('2d')!.drawImage(source.snap, crop.x * k, crop.y * k, pc.width, pc.height, 0, 0, pc.width, pc.height);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pc);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([246, 245, 241, 255]));
+  }
   const backTex = makeTex(2);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); // pixel art stays crisp
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const uFrame = u('uFrame');
+  // The game at its native resolution: a few hundred KB a refresh, not a
+  // full-screen copy. The game moves at pixel steps, so 30 Hz is plenty.
   const back = document.createElement('canvas');
-  const backCtx = back.getContext('2d')!;
-
-  // The backdrop: the arcade's paper, with the live game where the frame is.
-  const paintBackdrop = () => {
-    const k = 0.75;
-    const bw = Math.round(W * k);
-    const bh = Math.round(H * k);
-    if (back.width !== bw || back.height !== bh) {
-      back.width = bw;
-      back.height = bh;
-    }
-    backCtx.fillStyle = '#F6F5F1';
-    backCtx.fillRect(0, 0, bw, bh);
+  back.width = 320;
+  back.height = 184;
+  const backCtx = back.getContext('2d', { willReadFrequently: false })!;
+  backCtx.imageSmoothingEnabled = false;
+  let backAt = -1;
+  const paintBackdrop = (now: number) => {
     const r = backdrop.rect();
-    backCtx.imageSmoothingEnabled = false;
-    backCtx.drawImage(backdrop.canvas, r.left * k, r.top * k, r.width * k, r.height * k);
+    gl.uniform4f(uFrame, r.left / W, r.top / H, r.right / W, r.bottom / H);
+    if (now - backAt < 32) return;
+    backAt = now;
+    backCtx.drawImage(backdrop.canvas, 0, 0, back.width, back.height);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, backTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, back);
@@ -436,7 +449,7 @@ export function createShardMenu(
       const q = turn(p, lay.a);
       return [(q.x - bx0) / lw, (by1 - q.y) / lh];
     };
-    const pageUv = (p: Pt) => [(rest.x + p.x + W / 2) / W, (H / 2 - (rest.y + p.y)) / H];
+    const pageUv = (p: Pt) => [(rest.x + p.x + W / 2 - crop.x) / crop.w, (H / 2 - (rest.y + p.y) - crop.y) / crop.h];
 
     // Slab pieces. Fans from the centroid: aEdge is 1 there and 0 on the rim.
     const o = { x: 0, y: 0 };
@@ -569,9 +582,10 @@ export function createShardMenu(
   const SWAY = [-0.04, 0.035, -0.02];
   const DX = [-12, 16, -6];
   // Real shards come in different heights, so stack them by their own size.
+  let frameRect = anchor(); // measured once per frame, not once per shard
   const slot = (i: number): Pose => {
     const s = shards[i];
-    const r = anchor();
+    const r = frameRect;
     const gap = Math.min(16, r.height * 0.05);
     const total = shards.reduce((t, x) => t + x.hh * 2, 0) + gap * (shards.length - 1);
     let top = r.top + r.height / 2 - total / 2;
@@ -660,7 +674,8 @@ export function createShardMenu(
     clock += dt;
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    paintBackdrop();
+    frameRect = anchor();
+    paintBackdrop(now);
     let live = false;
 
     shards.forEach((s, i) => {
@@ -682,6 +697,11 @@ export function createShardMenu(
         s.cur.mix = s.from.mix + (1 - s.from.mix) * smooth(clamp((s.t - 0.28) / 0.34, 0, 1));
         if (s.t >= 1) {
           s.state = 'idle';
+          // The flight ends a whole turn round; call that zero, or the idle
+          // easing would unwind it as a spin after landing.
+          s.cur.rx = wrap(s.cur.rx);
+          s.cur.ry = wrap(s.cur.ry);
+          s.cur.rz = s.flat + wrap(s.cur.rz - s.flat);
           s.cur.z = -14; // a little dip as it lands; idle eases it back
           tone(1568 + i * 196, 1568 + i * 196, 0.5, 0.03, 'sine');
           tone(3136 + i * 392, 2800, 0.12, 0.015, 'triangle', 0.02);
