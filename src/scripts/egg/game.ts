@@ -8,7 +8,8 @@
 // the floor. Everything is drawn back to front by its y.
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
 import { burst, tone } from './audio';
-import { BOT_VIEW, buildSprites, drawText, HAND_ANGLES, PAL, type Sprite, type Sprites } from './sprites';
+import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
+import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW } from './people';
 import { freshLoadout, liftKinds, LIFT_LABEL, makeOffer, WEAPONS, type Ctx, type Loadout, type Offer, type OfferKind } from './upgrades';
 
 export const VIEW_W = 320;
@@ -63,8 +64,8 @@ const DASH_SPEED = 250;
 const DASH_TIME = 0.17;
 const DASH_COOL = 0.65;
 const BULLET = 300;
-const GUN_Z = 6; // shots fly at hand height
-const HAND_R = 5; // how far the gun hand floats from the body
+const GUN_Z = PERSON_SHOULDER; // shots fly at shoulder height
+const REACH = 4; // how far the gun hand is from the shoulder
 
 // Office colours, kept to the site palette plus glass and steel.
 const WALL = '#F1EFE9';
@@ -248,6 +249,8 @@ export class Game {
 
   private ctx: CanvasRenderingContext2D;
   private sprites: Sprites = buildSprites();
+  private person = buildPerson();
+  private guns = buildGuns();
   private bg: HTMLCanvasElement;
   private raf = 0;
   private last = 0;
@@ -715,8 +718,9 @@ export class Game {
       p.cool = w.cool * l.rate * (p.rapid > 0 ? 0.5 : 1);
       p.kick = 0.08;
       // Out of the fingertip, fanned when there's more than one.
-      const bx = p.x + aim.x * (HAND_R + 4.5);
-      const by = p.y + aim.y * (HAND_R + 4.5);
+      const muzzle = REACH + this.guns[l.weapon].muzzle;
+      const bx = p.x + aim.x * muzzle;
+      const by = p.y + aim.y * muzzle;
       const n = w.pellets + l.extra;
       const fan = n > 1 ? Math.max(w.spread, 0.16 * (n - 1)) : 0;
       const base = Math.atan2(aim.y, aim.x);
@@ -729,9 +733,10 @@ export class Game {
         });
       }
       this.particles.push({ x: bx, y: by, z: GUN_Z, vx: aim.x * 30, vy: aim.y * 30, vz: 0, life: 0.06, max: 0.06, color: PAL.y });
-      if (w.id === 'shotgun') burst(0.12, 700, 0.3, 'lowpass');
-      else if (w.id === 'laser') tone(1400, 300, 0.12, 0.05, 'sawtooth');
-      else tone(w.id === 'machine' ? 1100 : 900, 480, 0.05, 0.04, 'square');
+      if (w.id === 'shotgun') burst(0.14, 600, 0.35, 'lowpass');
+      else if (w.id === 'rail') tone(1400, 300, 0.12, 0.05, 'sawtooth');
+      else if (w.id === 'revolver') (burst(0.08, 900, 0.25, 'lowpass'), tone(600, 300, 0.06, 0.04, 'square'));
+      else (burst(0.04, 1800, 0.18), tone(w.id === 'smg' ? 1100 : 900, 480, 0.05, 0.035, 'square'));
       if (w.id === 'shotgun') (p.vx -= aim.x * 60), (p.vy -= aim.y * 60);
     }
     p.inv -= dt;
@@ -1267,6 +1272,32 @@ export class Game {
     c.fillRect(Math.round(x - w / 2) + 1, Math.round(y) + 1, w - 2, 1);
   }
 
+  // An arm: a sleeve from shoulder to hand, outlined, with a hand at the end
+  // when it's not holding anything.
+  private arm(from: { x: number; y: number }, to: { x: number; y: number }, bareHand: boolean) {
+    const c = this.ctx;
+    const n = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+    const pts = Array.from({ length: n + 1 }, (_, i) => ({
+      x: Math.round(from.x + ((to.x - from.x) * i) / n),
+      y: Math.round(from.y + ((to.y - from.y) * i) / n),
+    }));
+    c.fillStyle = PEOPLE.k;
+    for (const q of pts) c.fillRect(q.x - 1, q.y - 1, 3, 3);
+    c.fillStyle = PEOPLE.h;
+    for (const q of pts) c.fillRect(q.x, q.y, 1, 1);
+    if (bareHand) this.fist(to);
+  }
+
+  private fist(at: { x: number; y: number }) {
+    const c = this.ctx;
+    const x = Math.round(at.x);
+    const y = Math.round(at.y);
+    c.fillStyle = PEOPLE.k;
+    c.fillRect(x - 1, y - 1, 3, 3);
+    c.fillStyle = PEOPLE.s;
+    c.fillRect(x, y, 1, 1);
+  }
+
   private draw(s: Sprite, x: number, y: number, face: number, flash = false, scale = 1) {
     const img = flash ? s.flash : face < 0 ? s.left : s.right;
     this.ctx.drawImage(img, Math.round(x), Math.round(y), s.w * scale, s.h * scale);
@@ -1324,8 +1355,8 @@ export class Game {
         draw: () => {
           // Body: one of eight views, from where it's looking.
           const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
-          const [view, mirror] = BOT_VIEW[oct];
-          const f = sp.bot[view];
+          const [view, mirror] = PERSON_VIEW[oct];
+          const f = this.person[view];
           const moving = Math.hypot(p.vx, p.vy) > 10;
           const step = Math.floor(p.anim / 6) % 2;
           const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
@@ -1334,32 +1365,48 @@ export class Game {
           const bx = Math.round(p.x - s.w / 2);
           const by = Math.round(p.y - s.h + 1 + bob);
 
-          // Gun hand: a finger gun, pointing where it aims, kicking back on a shot.
+          // Arms and gun. The gun hand reaches from the shoulder on the aiming
+          // side; the other hand takes the fore-grip of a long gun, or hangs.
           const aim = this.aimDir(p);
-          const g = this.gun(p);
-          const reach = HAND_R - (p.kick / 0.08) * 2;
-          const hk = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * HAND_ANGLES) + HAND_ANGLES) % HAND_ANGLES;
-          const hand = () => c.drawImage(sp.hands[hk], Math.round(g.x + aim.x * reach) - 5, Math.round(g.y + aim.y * reach + bob) - 5);
-          // The other hand hangs at the far side, swinging as it walks.
-          const side = Math.abs(aim.x) > 0.25 ? -Math.sign(aim.x) : oct === 6 ? 1 : -1;
+          const gun = this.guns[this.loadout.weapon];
+          const sy = p.y - PERSON_SHOULDER + bob;
+          const side = Math.abs(aim.x) > 0.2 ? Math.sign(aim.x) : oct === 6 ? 1 : -1;
+          const gunShoulder = { x: p.x + side * 4, y: sy };
+          const offShoulder = { x: p.x - side * 4, y: sy };
+          const reach = REACH - (p.kick / 0.08) * 1.5;
+          const hand = { x: gunShoulder.x + aim.x * reach, y: gunShoulder.y + aim.y * reach };
+          const k = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * GUN_ANGLES) + GUN_ANGLES) % GUN_ANGLES;
           const swing = moving ? (step ? 1 : -1) : 0;
-          const mitten = () => this.draw(sp.mitten, Math.round(p.x + side * 6 - 2), Math.round(p.y - 6 + bob + swing), 1);
+          const offHand = gun.fore
+            ? { x: hand.x + aim.x * gun.fore, y: hand.y + aim.y * gun.fore }
+            : { x: offShoulder.x - side * 0.5, y: offShoulder.y + 6 + swing };
+          const arms = () => {
+            this.arm(gunShoulder, hand, false);
+            this.arm(offShoulder, offHand, !gun.fore);
+            c.drawImage(gun.frames[k], Math.round(hand.x - gun.half), Math.round(hand.y - gun.half));
+            if (gun.fore) this.fist(offHand);
+            // Muzzle flash on the frame of a shot.
+            if (p.kick > 0.05) {
+              const mx = Math.round(hand.x + aim.x * (gun.muzzle + 1.5));
+              const my = Math.round(hand.y + aim.y * (gun.muzzle + 1.5));
+              c.fillStyle = PAL.y;
+              c.fillRect(mx - 1, my, 3, 1);
+              c.fillRect(mx, my - 1, 1, 3);
+              c.fillStyle = '#FFFFFF';
+              c.fillRect(mx, my, 1, 1);
+            }
+          };
 
-          const handBehind = aim.y < -0.35; // pointing up the room: the body is in front of it
-          const mittenBehind = view === 'e' || view === 'ne' || view === 'n';
-          if (handBehind) hand();
-          if (mittenBehind) mitten();
+          const behind = aim.y < -0.35; // aiming up the room: the body is in front
+          if (behind) arms();
           this.draw(s, bx, by, mirror ? -1 : 1);
-          if (!mittenBehind) mitten();
-          if (!handBehind) hand();
+          if (!behind) arms();
 
-          // Rapid fire: the antenna bulb blinks.
+          // Rapid fire: a spark over the head.
           if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
-            const col = { s: 6, se: 5, e: 5, ne: 7, n: 6 }[view];
-            c.fillStyle = PAL.r;
-            c.fillRect(bx + (mirror ? 12 - col : col), by, 1, 1);
-            c.fillStyle = 'rgba(217,164,65,0.6)';
-            c.fillRect(bx + (mirror ? 12 - col : col) - 1, by - 1, 3, 1);
+            c.fillStyle = PAL.y;
+            c.fillRect(Math.round(p.x) - 1, by - 3, 3, 1);
+            c.fillRect(Math.round(p.x), by - 4, 1, 3);
           }
         },
       });

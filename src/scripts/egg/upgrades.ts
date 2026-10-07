@@ -1,6 +1,6 @@
-// What the lifts lead to after a boss: a shop, a power-up, a new weapon, or a
-// repair bay. Weapons are all hand gestures; perks and shop items change the
-// player's loadout for the rest of the run.
+// What the lifts lead to after a boss: a shop, a power-up, a new gun, or a
+// repair bay. Perks and shop items change the player's loadout for the rest
+// of the run.
 
 export interface Weapon {
   id: string;
@@ -19,24 +19,24 @@ export interface Weapon {
 }
 
 export const WEAPONS: Record<string, Weapon> = {
-  finger: {
-    id: 'finger', name: 'Finger gun', blurb: 'The classic. Point, and pew.',
+  pistol: {
+    id: 'pistol', name: 'Pistol', blurb: 'Reliable. Point and shoot.',
     cool: 0.16, dmg: 1, speed: 300, pellets: 1, spread: 0, life: 1.2, pierce: 0, bounce: 0, size: 2, color: '#C4532F',
   },
   shotgun: {
-    id: 'shotgun', name: 'Finger shotgun', blurb: 'Five pellets, short reach, lots of push.',
+    id: 'shotgun', name: 'Pump shotgun', blurb: 'Five pellets, short reach, a big kick.',
     cool: 0.5, dmg: 1, speed: 290, pellets: 5, spread: 0.55, life: 0.36, pierce: 0, bounce: 0, size: 2, color: '#C4532F',
   },
-  machine: {
-    id: 'machine', name: 'Machine finger', blurb: 'Very fast, a little wild.',
+  smg: {
+    id: 'smg', name: 'SMG', blurb: 'Very fast, a little wild.',
     cool: 0.065, dmg: 1, speed: 340, pellets: 1, spread: 0.14, life: 1, pierce: 0, bounce: 0, size: 1, color: '#D9A441',
   },
-  laser: {
-    id: 'laser', name: 'Snap laser', blurb: 'Slow and heavy. Goes straight through everything.',
+  rail: {
+    id: 'rail', name: 'Rail rifle', blurb: 'Slow and heavy. Goes straight through everything.',
     cool: 0.42, dmg: 3, speed: 460, pellets: 1, spread: 0, life: 1, pierce: 99, bounce: 0, size: 3, color: '#2E4D3A',
   },
-  bank: {
-    id: 'bank', name: 'Bank shot', blurb: 'Bounces off the walls twice.',
+  revolver: {
+    id: 'revolver', name: 'Ricochet revolver', blurb: 'Rounds bounce off the walls twice.',
     cool: 0.2, dmg: 1, speed: 280, pellets: 1, spread: 0, life: 2.4, pierce: 0, bounce: 2, size: 2, color: '#5E8A6C',
   },
 };
@@ -56,7 +56,7 @@ export interface Loadout {
 }
 
 export const freshLoadout = (): Loadout => ({
-  weapon: 'finger', maxHp: 5, dmg: 0, rate: 1, pierce: 0, extra: 0, dashCool: 1,
+  weapon: 'pistol', maxHp: 5, dmg: 0, rate: 1, pierce: 0, extra: 0, dashCool: 1,
   magnet: false, chipMult: 1, vampire: 0, kills: 0,
 });
 
@@ -75,14 +75,14 @@ export interface Perk {
 }
 
 export const PERKS: Perk[] = [
-  { id: 'tough', name: 'Thick plating', blurb: '+1 max heart, and a heart back.', apply: (c) => ((c.l.maxHp += 1), c.heal(1)) },
-  { id: 'power', name: 'Heavy knuckles', blurb: 'Every shot does +1 damage.', apply: (c) => (c.l.dmg += 1) },
-  { id: 'twin', name: 'Extra finger', blurb: 'One more shot, fanned out.', ok: (l) => l.extra < 3, apply: (c) => (c.l.extra += 1) },
-  { id: 'pierce', name: 'Sharp nails', blurb: 'Shots pass through one more bug.', apply: (c) => (c.l.pierce += 1) },
-  { id: 'overclock', name: 'Overclock', blurb: 'Fire 20% faster.', apply: (c) => (c.l.rate *= 0.8) },
+  { id: 'tough', name: 'Kevlar vest', blurb: '+1 max heart, and a heart back.', apply: (c) => ((c.l.maxHp += 1), c.heal(1)) },
+  { id: 'power', name: 'Hollow points', blurb: 'Every shot does +1 damage.', apply: (c) => (c.l.dmg += 1) },
+  { id: 'twin', name: 'Extra barrel', blurb: 'One more shot, fanned out.', ok: (l) => l.extra < 3, apply: (c) => (c.l.extra += 1) },
+  { id: 'pierce', name: 'AP rounds', blurb: 'Shots pass through one more bug.', apply: (c) => (c.l.pierce += 1) },
+  { id: 'overclock', name: 'Espresso shot', blurb: 'Fire 20% faster.', apply: (c) => (c.l.rate *= 0.8) },
   { id: 'magnet', name: 'Magnet', blurb: 'Pickups fly to you; bugs drop 50% more chips.', ok: (l) => !l.magnet, apply: (c) => ((c.l.magnet = true), (c.l.chipMult *= 1.5)) },
-  { id: 'vampire', name: 'Bug juice', blurb: 'Every 12 kills heals a heart.', ok: (l) => l.vampire === 0 || l.vampire > 6, apply: (c) => (c.l.vampire = c.l.vampire ? c.l.vampire - 3 : 12) },
-  { id: 'dash', name: 'Spring heels', blurb: 'Dash recovers twice as fast.', ok: (l) => l.dashCool > 0.3, apply: (c) => (c.l.dashCool *= 0.5) },
+  { id: 'vampire', name: 'Coffee break', blurb: 'Every 12 kills heals a heart.', ok: (l) => l.vampire === 0 || l.vampire > 6, apply: (c) => (c.l.vampire = c.l.vampire ? c.l.vampire - 3 : 12) },
+  { id: 'dash', name: 'Running shoes', blurb: 'Dash recovers twice as fast.', ok: (l) => l.dashCool > 0.3, apply: (c) => (c.l.dashCool *= 0.5) },
 ];
 
 export interface ShopItem {
@@ -96,12 +96,12 @@ export interface ShopItem {
 /** The shelf for a visit; prices climb with each boss beaten. */
 export function stock(tier: number): ShopItem[] {
   const all: ShopItem[] = [
-    { id: 'repair', name: 'Patch kit', blurb: '+2 hearts.', price: 6 + tier * 2, apply: (c) => c.heal(2) },
-    { id: 'heart', name: 'Spare heart', blurb: '+1 max heart.', price: 18 + tier * 6, apply: (c) => ((c.l.maxHp += 1), c.heal(1)) },
-    { id: 'power', name: 'Knuckle dusters', blurb: '+1 damage per shot.', price: 22 + tier * 8, apply: (c) => (c.l.dmg += 1) },
-    { id: 'overclock', name: 'Faster finger', blurb: 'Fire 15% faster.', price: 16 + tier * 6, apply: (c) => (c.l.rate *= 0.85) },
+    { id: 'repair', name: 'First-aid kit', blurb: '+2 hearts.', price: 6 + tier * 2, apply: (c) => c.heal(2) },
+    { id: 'heart', name: 'Energy drink', blurb: '+1 max heart.', price: 18 + tier * 6, apply: (c) => ((c.l.maxHp += 1), c.heal(1)) },
+    { id: 'power', name: 'Heavy rounds', blurb: '+1 damage per shot.', price: 22 + tier * 8, apply: (c) => (c.l.dmg += 1) },
+    { id: 'overclock', name: 'Hair trigger', blurb: 'Fire 15% faster.', price: 16 + tier * 6, apply: (c) => (c.l.rate *= 0.85) },
     { id: 'dash', name: 'Better sneakers', blurb: 'Dash cooldown −25%.', price: 10 + tier * 4, apply: (c) => (c.l.dashCool *= 0.75) },
-    { id: 'pierce', name: 'Sharpener', blurb: 'Shots pass through one more bug.', price: 20 + tier * 7, apply: (c) => (c.l.pierce += 1) },
+    { id: 'pierce', name: 'Piercing rounds', blurb: 'Shots pass through one more bug.', price: 20 + tier * 7, apply: (c) => (c.l.pierce += 1) },
   ];
   return pick(all, 4);
 }

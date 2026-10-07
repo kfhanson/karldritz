@@ -49,161 +49,6 @@ function sprite(rows: string[]): Sprite {
   };
 }
 
-// ── Player: a little robot, drawn from five angles ──
-// Big round head with a screen for a face, antenna, stubby body. The other
-// three angles are mirrors (the sprite's `left`). 13 × 14.
-type Dir5 = 's' | 'se' | 'e' | 'ne' | 'n';
-
-const HEAD: Record<Dir5, string[]> = {
-  s: [
-    '......y......',
-    '......k......',
-    '...kkkkkkk...',
-    '..kccccccck..',
-    '..kccccccck..',
-    '..kckccckck..',
-    '..kckccckck..',
-    '..krcckccrk..',
-    '..kwcccccwk..',
-    '...kkkkkkk...',
-  ],
-  se: [
-    '.....y.......',
-    '.....k.......',
-    '...kkkkkkk...',
-    '..kwcccccck..',
-    '..kwcccccck..',
-    '..kwckcckck..',
-    '..kwckcckck..',
-    '..kwrcckcrk..',
-    '..kwwccccwk..',
-    '...kkkkkkk...',
-  ],
-  e: [
-    '.....y.......',
-    '.....k.......',
-    '...kkkkkkk...',
-    '..kwwccccck..',
-    '..kwmccccck..',
-    '..kwmccckck..',
-    '..kwmccckck..',
-    '..kwccrcckk..',
-    '..kwwccccwk..',
-    '...kkkkkkk...',
-  ],
-  ne: [
-    '.......y.....',
-    '.......k.....',
-    '...kkkkkkk...',
-    '..kccccccwk..',
-    '..kcmcmccwk..',
-    '..kcccccckk..',
-    '..kcmcmcckk..',
-    '..kccccccwk..',
-    '..kwccccwwk..',
-    '...kkkkkkk...',
-  ],
-  n: [
-    '......y......',
-    '......k......',
-    '...kkkkkkk...',
-    '..kccccccck..',
-    '..kcwcccwck..',
-    '..kccccccck..',
-    '..kcmmmmmck..',
-    '..kccccccck..',
-    '..kwcccccwk..',
-    '...kkkkkkk...',
-  ],
-};
-// Eyes shut: half as tall.
-const BLINK: Partial<Record<Dir5, [number, string][]>> = {
-  s: [[5, '..kccccccck..']],
-  se: [[5, '..kwcccccck..']],
-  e: [[5, '..kwmccccck..']],
-};
-const TORSO: Record<Dir5, string[]> = {
-  s: ['....kgggk....', '....kglgk....', '....kgggk....'],
-  se: ['....kgggk....', '....kgglk....', '....kgggk....'],
-  e: ['....kgggk....', '....kgglk....', '....kgggk....'],
-  ne: ['....kgygk....', '....kgygk....', '....kgggk....'],
-  n: ['....kgygk....', '....kgygk....', '....kgggk....'],
-};
-const FEET = {
-  idle: ['....kk.kk....'],
-  a: ['...kk...kk...'],
-  b: ['.....kkk.....'],
-};
-
-export type BotFrames = { idle: Sprite; a: Sprite; b: Sprite; blink: Sprite };
-
-function botFrames(d: Dir5): BotFrames {
-  const head = HEAD[d];
-  const shut = head.slice();
-  for (const [row, line] of BLINK[d] ?? []) shut[row] = line;
-  const build = (h: string[], feet: string[]) => sprite([...h, ...TORSO[d], ...feet]);
-  return { idle: build(head, FEET.idle), a: build(head, FEET.a), b: build(head, FEET.b), blink: build(shut, FEET.idle) };
-}
-
-/** Which drawing and whether to mirror it, for eight directions (0 = east, clockwise on screen). */
-export const BOT_VIEW: [Dir5, boolean][] = [
-  ['e', false], ['se', false], ['s', false], ['se', true],
-  ['e', true], ['ne', true], ['n', false], ['ne', false],
-];
-
-// ── The finger-gun hand ──
-// Drawn by hand pointing east and south-east, with the thumb cocked up; the
-// other six directions are those turned a quarter or mirrored. 11 × 11, the
-// fist near the middle so it turns about itself.
-const HAND_E = [
-  '...........',
-  '...........',
-  '..kk.......',
-  '.kcck......',
-  '.kccckkkkk.',
-  '.kcccccccck',
-  '.kcwckkkkk.',
-  '.kwwwk.....',
-  '..kkk......',
-  '...........',
-  '...........',
-];
-const HAND_SE = [
-  '...k.......',
-  '..kck......',
-  '.kkckk.....',
-  '.kccck.....',
-  '.kcccck....',
-  '.kwcccck...',
-  '..kwkccck..',
-  '...k.kccck.',
-  '......kcck.',
-  '.......kk..',
-  '...........',
-];
-const turnCW = (r: string[]) => r.map((_, y) => r.map((row) => row[y]).reverse().join(''));
-const turnCCW = (r: string[]) => turnCW(turnCW(turnCW(r)));
-const flip = (r: string[]) => r.map((row) => [...row].reverse().join(''));
-
-export const HAND_ANGLES = 8;
-export function buildHands(): HTMLCanvasElement[] {
-  // 0 = east, clockwise on screen.
-  const rows = [
-    HAND_E,
-    HAND_SE,
-    turnCW(HAND_E),
-    flip(HAND_SE),
-    flip(HAND_E),
-    flip(turnCCW(HAND_SE)),
-    flip(turnCCW(HAND_E)),
-    turnCCW(HAND_SE),
-  ];
-  return rows.map((r) => paint(r));
-}
-
-// The other hand, just a mitten.
-const MITTEN = ['.kkk.', 'kccck', 'kcwck', '.kkk.'];
-
 // ── Monsters ──
 const CRAWLER = [
   '.k......k.',
@@ -255,9 +100,6 @@ const BOLT = ['...yy', '..yy.', '.yyyy', '..yy.', '.yy..', 'yy...'];
 
 export function buildSprites() {
   return {
-    bot: { s: botFrames('s'), se: botFrames('se'), e: botFrames('e'), ne: botFrames('ne'), n: botFrames('n') },
-    hands: buildHands(),
-    mitten: sprite(MITTEN),
     crawler: [sprite([...CRAWLER, CRAWLER_LEGS[0]]), sprite([...CRAWLER, CRAWLER_LEGS[1]])],
     flyer: [sprite(FLYER_UP), sprite(FLYER_DOWN)],
     brute: BRUTE_LEGS.map((legs) => sprite([...BRUTE, ...legs])),
@@ -314,19 +156,6 @@ export function pixelLine(text: string, icon?: HTMLCanvasElement, color = PAL.k)
 export const HUD_COIN = (): HTMLCanvasElement =>
   paint(['.kkk.', 'kyyyk', 'kywyk', 'kyyyk', '.kkk.']);
 
-/** The current hand, as a HUD icon: the finger gun plus what comes out of it. */
-export function weaponIcon(id: string): HTMLCanvasElement {
-  const hand = HAND_E.slice(2, 9).map((r) => r.slice(0, 11)); // 11 × 7, finger on row 3
-  const tip: Record<string, string[]> = {
-    finger: ['....', '....', '....', '.r..', '....', '....', '....'],
-    shotgun: ['....', '..r.', '....', '.r.r', '....', '..r.', '....'],
-    machine: ['....', '....', '....', 'y.y.', '....', '....', '....'],
-    laser: ['....', '....', '....', 'gggg', '....', '....', '....'],
-    bank: ['....', '...l', '..l.', '.l..', '....', '....', '....'],
-  };
-  const t = tip[id] ?? tip.finger;
-  return paint(hand.map((row, i) => row + t[i]));
-}
 
 export function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string) {
   ctx.fillStyle = color;

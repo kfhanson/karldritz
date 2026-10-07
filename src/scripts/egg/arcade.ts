@@ -5,7 +5,8 @@ import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
 import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer } from './game';
 import { WEAPONS } from './upgrades';
-import { HUD_COIN, pixelLine, weaponIcon } from './sprites';
+import { HUD_COIN, pixelLine } from './sprites';
+import { gunIcon } from './people';
 import { createShardMenu, type ShardMenu, type ShardSource } from './shardmenu';
 
 const KEYS: Record<string, Action> = {
@@ -44,7 +45,7 @@ const TEMPLATE = `
         <div><dt>Score</dt><dd data-score>00000</dd></div>
         <div class="ea-best"><dt>Best</dt><dd data-best>00000</dd></div>
         <div class="ea-chips"><dt>Chips</dt><dd data-chips>000</dd></div>
-        <div class="ea-weapon"><dt>Hand</dt><dd data-weapon>Finger gun</dd></div>
+        <div class="ea-weapon"><dt>Gun</dt><dd data-weapon>Pistol</dd></div>
         <div class="ea-hearts" data-hearts aria-label="Health"></div>
         <div class="ea-mult" data-mult hidden></div>
       </dl>
@@ -234,7 +235,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     pixel('[data-score]', pad(h.score, 5), String(h.score));
     pixel('[data-best]', pad(h.best, 5), String(h.best));
     pixel('[data-chips]', pad(h.chips, 3), `${h.chips} chips`, coin);
-    pixel('[data-weapon]', '', h.weapon, weaponIcon(h.weaponId), h.weaponId);
+    pixel('[data-weapon]', '', h.weapon, gunIcon(h.weaponId), h.weaponId);
     if (heartCount !== h.maxHp) {
       hearts.innerHTML = Array.from({ length: h.maxHp }, () => `<span class="ea-heart">${HEART_SVG}</span>`).join('');
       heartCount = h.maxHp;
@@ -274,11 +275,11 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       offerKeys = o.perks.map((p) => () => (game.takePerk(p), done()));
     } else if (o.kind === 'weapon' && o.weapons) {
       kicker.textContent = 'Weapon';
-      title.textContent = 'Swap your hand.';
+      title.textContent = 'Swap your gun.';
       copy.textContent = `Now holding: ${WEAPONS[game.weaponId].name}. Take one, or keep it.`;
       cards.innerHTML = o.weapons.map((w, i) => card(w.name, w.blurb, w.pellets > 1 ? `${w.pellets} shots` : `${w.dmg} dmg`, i)).join('');
       offerKeys = o.weapons.map((w) => () => (game.takeWeapon(w.id), done()));
-      actions.innerHTML = '<button type="button" data-offer-leave>Keep my hand <span>Esc</span></button>';
+      actions.innerHTML = '<button type="button" data-offer-leave>Keep my gun <span>Esc</span></button>';
     } else if (o.kind === 'shop' && o.shop) {
       kicker.textContent = 'Shop';
       title.textContent = 'Spend your chips.';
