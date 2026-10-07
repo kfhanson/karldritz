@@ -495,7 +495,7 @@ function shake(strength: number, ms: number) {
 // ── Snapshot ──
 async function capture(): Promise<HTMLCanvasElement | null> {
   const { snapshot: shoot } = await import('./snapshot');
-  return shoot(Math.min(window.devicePixelRatio || 1, 2));
+  return shoot(Math.min(window.devicePixelRatio || 1, 1.5)); // matches the 3D canvases; less to upload
 }
 
 function prepare() {
@@ -542,6 +542,16 @@ export function crack(hit: number, at: Pt) {
     tone(1800 + Math.random() * 600, 900, 0.05, 0.05, 'triangle');
   });
   afterPaint(prepare, 80);
+  if (hit === 1) prewarmGL();
+}
+
+// Make the WebGL contexts for the break and the menu now, in quiet moments
+// between hits, rather than all at once when the glass gives.
+function prewarmGL() {
+  if (reduceMotion()) return;
+  const idle = window.requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 120));
+  idle(() => import('./shards3d').then((m) => m.prewarm3D()), { timeout: 600 });
+  idle(() => import('./shardmenu').then((m) => m.prewarmMenu()), { timeout: 1200 });
 }
 
 /** Let the glass mend, tips first. Resolves true once it's gone, false if struck again first. */
@@ -626,8 +636,10 @@ export async function shatter(at: Pt): Promise<void> {
     await fall(shards);
   }
   layer!.style.pointerEvents = 'none';
+  if (canvas) canvas.style.visibility = 'hidden'; // empty until the rewind; don't composite it
 
   await arcade.exit;
+  if (canvas) canvas.style.visibility = '';
   const sameView = snapAt.w === innerWidth && snapAt.h === innerHeight;
   if (sameView && !reduceMotion()) {
     layer!.style.pointerEvents = 'auto';

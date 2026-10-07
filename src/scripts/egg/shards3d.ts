@@ -162,28 +162,80 @@ function model(out: Float32Array, s: Shard, k = 1) {
   out[15] = 1;
 }
 
+// ── Contexts made ahead of time ──
+// Creating a WebGL context and compiling its shaders takes a couple of hundred
+// milliseconds. Done at the moment of the break, that's a visible freeze, so
+// they're made while the cracks are still spreading and picked up when needed.
+export interface GLKit {
+  canvas: HTMLCanvasElement;
+  gl: WebGLRenderingContext;
+  program: WebGLProgram;
+}
+
+function makeKit(vert: string, frag: string): GLKit | null {
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: true });
+  if (!gl) return null;
+  try {
+    const program = gl.createProgram()!;
+    gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, vert));
+    gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, frag));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'link');
+    return { canvas, gl, program };
+  } catch (err) {
+    console.warn('[egg] WebGL unavailable', err);
+    return null;
+  }
+}
+
+const kits = new Map<string, GLKit | null>();
+
+/** Full-screen size at the resolution the 3D canvases use (capped at 1.5×). */
+export const screenSize = () => {
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  return { w: Math.round(innerWidth * dpr), h: Math.round(innerHeight * dpr) };
+};
+
+/** Resize only when it changes: reallocating a full-screen buffer is costly. */
+export function fit(canvas: HTMLCanvasElement, w: number, h: number) {
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+}
+
+export function prewarmKit(key: string, vert: string, frag: string) {
+  if (kits.has(key)) return;
+  const kit = makeKit(vert, frag);
+  if (kit) {
+    // Allocate the drawing buffer now too, and draw once so it's really made.
+    const { w, h } = screenSize();
+    fit(kit.canvas, w, h);
+    kit.gl.viewport(0, 0, w, h);
+    kit.gl.clear(kit.gl.COLOR_BUFFER_BIT);
+  }
+  kits.set(key, kit);
+}
+
+/** A ready context for one use: the prewarmed one if there is one. */
+export function takeKit(key: string, vert: string, frag: string): GLKit | null {
+  const kit = kits.has(key) ? kits.get(key)! : makeKit(vert, frag);
+  kits.delete(key);
+  return kit;
+}
+
+export const prewarm3D = () => prewarmKit('fall', VERT, FRAG);
+
 export function create3D(host: HTMLElement, snap: HTMLCanvasElement, cells: Pt[][], o: Pt, R: number): ShardScene | null {
   const W = innerWidth;
   const H = innerHeight;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
+  // 1.5× is indistinguishable once the shards move, and a full-screen,
+  // antialiased, depth-tested canvas at 2× is a lot of pixels to push.
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  const kit = takeKit('fall', VERT, FRAG);
+  if (!kit) return null;
+  const { canvas, gl, program } = kit;
+  fit(canvas, Math.round(W * dpr), Math.round(H * dpr));
   canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: true });
-  if (!gl) return null;
-
-  let program: WebGLProgram;
-  try {
-    program = gl.createProgram()!;
-    gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERT));
-    gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
-  } catch (err) {
-    console.warn('[egg] 3D shards unavailable', err);
-    return null;
-  }
   gl.useProgram(program);
 
   // ── Geometry: one buffer for every shard ──
@@ -357,6 +409,7 @@ export function create3D(host: HTMLElement, snap: HTMLCanvasElement, cells: Pt[]
           if (alive && t < 4000) raf = requestAnimationFrame(frame);
           else {
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            canvas.style.visibility = 'hidden'; // an empty full-screen layer still costs compositing
             resolve();
           }
         };
@@ -367,6 +420,7 @@ export function create3D(host: HTMLElement, snap: HTMLCanvasElement, cells: Pt[]
       new Promise<void>((resolve) => {
         const from = shards.map((s) => ({ x: s.x, y: s.y, z: s.z, angle: s.angle % (Math.PI * 2) }));
         const DUR = 700;
+        canvas.style.visibility = '';
         const start = performance.now();
         const frame = (now: number) => {
           const t = Math.max(0, now - start);
