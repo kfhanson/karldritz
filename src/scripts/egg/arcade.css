@@ -75,10 +75,10 @@
   transform: translateY(14px);
   transition: opacity 0.6s ease, transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.egg-arcade.is-in .ea-top { opacity: 1; transform: none; transition-delay: 0.35s; }
-.egg-arcade.is-in .ea-bar { opacity: 1; transform: none; transition-delay: 0.45s; }
-.egg-arcade.is-in .ea-frame { opacity: 1; transform: none; transition-delay: 0.55s; }
-.egg-arcade.is-in .ea-help { opacity: 1; transform: none; transition-delay: 0.7s; }
+.egg-arcade.is-in .ea-top { opacity: 1; transform: none; transition-delay: 0.9s; }
+.egg-arcade.is-in .ea-bar { opacity: 1; transform: none; transition-delay: 1.05s; }
+.egg-arcade.is-in .ea-frame { opacity: 1; transform: none; transition-delay: 0.6s; }
+.egg-arcade.is-in .ea-help { opacity: 1; transform: none; transition-delay: 1.4s; }
 .egg-arcade.is-fading .ea-top,
 .egg-arcade.is-fading .ea-bar,
 .egg-arcade.is-fading .ea-frame,

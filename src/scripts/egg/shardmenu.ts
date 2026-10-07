@@ -145,6 +145,7 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const smooth = (p: number) => p * p * (3 - 2 * p);
 const easeInOut = (p: number) => 0.5 - Math.cos(Math.PI * p) / 2;
+const easeInOutCubic = (p: number) => (p < 0.5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2);
 
 // ── Column-major 4×4 ──
 type M4 = Float32Array;
@@ -667,17 +668,31 @@ export function createShardMenu(
       live = true;
       if (s.delay > 0) {
         s.delay -= dt;
-      } else if (s.state === 'peel' || s.state === 'home') {
-        // Scripted flight between the page and the menu, with one full flip.
-        const peel = s.state === 'peel';
+      } else if (s.state === 'peel') {
+        // Out of the page and into the menu, taking its time: it lifts toward
+        // the viewer, turns over slowly while it becomes glass, hangs at the
+        // top of its arc, then glides down into place and settles.
+        s.t = Math.min(1, s.t + dt / s.dur);
+        const e = easeInOutCubic(s.t);
+        const arc = Math.sin(Math.PI * s.t);
+        s.cur = lerpPose(s.from, slot(i), e);
+        s.cur.z += arc ** 1.4 * 320;
+        s.cur.ry += Math.PI * 2 * easeInOut(s.t) * (i % 2 ? -1 : 1);
+        s.cur.rx += arc * 0.45 * (i % 2 ? 1 : -1);
+        s.cur.mix = s.from.mix + (1 - s.from.mix) * smooth(clamp((s.t - 0.28) / 0.34, 0, 1));
+        if (s.t >= 1) {
+          s.state = 'idle';
+          s.cur.z = -14; // a little dip as it lands; idle eases it back
+          tone(1568 + i * 196, 1568 + i * 196, 0.5, 0.03, 'sine');
+          tone(3136 + i * 392, 2800, 0.12, 0.015, 'triangle', 0.02);
+        }
+      } else if (s.state === 'home') {
+        // Back into the page, with one full flip.
         s.t = Math.min(1, s.t + dt / s.dur);
         const e = easeInOut(s.t);
-        s.cur = lerpPose(s.from, peel ? slot(i) : s.rest, e);
+        s.cur = lerpPose(s.from, s.rest, e);
         s.cur.z += Math.sin(Math.PI * s.t) * 150;
-        if (peel) s.cur.ry += Math.PI * 2 * e * (i % 2 ? -1 : 1);
-        s.cur.mix = peel
-          ? s.from.mix + (1 - s.from.mix) * smooth(clamp((s.t - 0.25) / 0.5, 0, 1))
-          : s.from.mix * (1 - smooth(clamp((s.t - 0.2) / 0.6, 0, 1)));
+        s.cur.mix = s.from.mix * (1 - smooth(clamp((s.t - 0.2) / 0.6, 0, 1)));
         for (const f of s.frags) {
           const k = 1 - Math.min(1, dt * 6);
           f.x *= k;
@@ -685,7 +700,7 @@ export function createShardMenu(
           f.z *= k;
           f.angle *= k;
         }
-        if (s.t >= 1) s.state = peel ? 'idle' : 'rest';
+        if (s.t >= 1) s.state = 'rest';
       } else if (s.state === 'idle') {
         // Hang with a slow bob; lean toward the pointer when it's on them.
         const home = slot(i);
@@ -763,10 +778,10 @@ export function createShardMenu(
         s.hover = 0;
         for (const f of s.frags) Object.assign(f, { x: 0, y: 0, z: 0, angle: 0 });
         if (s.state === 'rest') {
-          fly(s, 'peel', 1.35, 0.22 + i * 0.14); // peel out of the page as it falls
+          fly(s, 'peel', 2.8, 0.35 + i * 0.4); // peel out of the page as it falls
         } else {
           s.cur = { ...below(s, i), mix: 1 };
-          fly(s, 'peel', 0.85, 0.05 + i * 0.1);
+          fly(s, 'peel', 1.4, 0.05 + i * 0.18);
         }
       });
       // Draw the first frame now: at the instant of the break the rest of the
