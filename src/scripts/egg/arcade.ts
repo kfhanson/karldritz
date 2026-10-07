@@ -5,6 +5,7 @@ import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
 import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer } from './game';
 import { WEAPONS } from './upgrades';
+import { HUD_COIN, pixelLine, weaponIcon } from './sprites';
 import { createShardMenu, type ShardMenu, type ShardSource } from './shardmenu';
 
 const KEYS: Record<string, Action> = {
@@ -207,11 +208,29 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
 
   const hearts = $('[data-hearts]');
   let heartCount = -1;
+  // HUD values are pixel art: a canvas drawn at 1px per pixel and scaled up
+  // crisp by CSS, with the plain value kept for screen readers.
+  const coin = HUD_COIN();
+  const shown = new Map<string, string>();
+  const pixel = (sel: string, text: string, label: string, icon?: HTMLCanvasElement, key = text, color?: string) => {
+    if (shown.get(sel) === key) return;
+    shown.set(sel, key);
+    const el = $(sel);
+    const art = pixelLine(text, icon, color);
+    art.className = 'ea-px';
+    art.setAttribute('aria-hidden', 'true');
+    art.style.setProperty('--w', String(art.width));
+    art.style.setProperty('--h', String(art.height));
+    el.replaceChildren(art, Object.assign(document.createElement('span'), { className: 'ea-sr', textContent: label }));
+  };
   function renderHud(h: Hud) {
     const idle = game.mode === 'attract';
-    $('[data-round]').textContent = idle ? '--' : pad(h.round, 2);
-    $('[data-score]').textContent = pad(h.score, 5);
-    $('[data-best]').textContent = pad(h.best, 5);
+    const round = idle ? '--' : pad(h.round, 2);
+    pixel('[data-round]', round, round);
+    pixel('[data-score]', pad(h.score, 5), String(h.score));
+    pixel('[data-best]', pad(h.best, 5), String(h.best));
+    pixel('[data-chips]', pad(h.chips, 3), `${h.chips} chips`, coin);
+    pixel('[data-weapon]', '', h.weapon, weaponIcon(h.weaponId), h.weaponId);
     if (heartCount !== h.maxHp) {
       hearts.innerHTML = Array.from({ length: h.maxHp }, () => `<span class="ea-heart">${HEART_SVG}</span>`).join('');
       heartCount = h.maxHp;
@@ -221,10 +240,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     hearts.setAttribute('aria-label', `Health ${hp} of ${h.maxHp}`);
     const mult = $('[data-mult]');
     mult.hidden = h.mult < 2;
-    mult.textContent = `×${h.mult}`;
+    if (h.mult >= 2) pixel('[data-mult]', `x${h.mult}`, `times ${h.mult}`, undefined, `x${h.mult}`, '#F6F5F1');
     root.classList.toggle('is-rapid', h.rapid);
-    $('[data-chips]').textContent = pad(h.chips, 3);
-    $('[data-weapon]').textContent = h.weapon;
   }
 
   // ── Lift offers: shop, power-up, weapon, repair ──

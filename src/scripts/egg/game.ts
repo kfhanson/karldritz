@@ -176,6 +176,7 @@ export interface Hud {
   rapid: boolean;
   chips: number;
   weapon: string;
+  weaponId: string;
 }
 
 export interface Hooks {
@@ -1070,6 +1071,7 @@ export class Game {
       maxHp: this.loadout.maxHp,
       chips: this.chips,
       weapon: WEAPONS[this.loadout.weapon].name,
+      weaponId: this.loadout.weapon,
       mult: this.mult(),
       rapid: !!p && p.rapid > 0,
     };

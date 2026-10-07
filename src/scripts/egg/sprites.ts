@@ -290,7 +290,43 @@ const GLYPHS: Record<string, string> = {
   '9': '111101111001111',
   '+': '000010111010000',
   x: '000101010101000',
+  '-': '000000111000000',
 };
+
+/**
+ * A row of pixel art for the HUD: optional icon, then 3×5 digits, at 1px per
+ * pixel (CSS scales it up with crisp edges). Icon and digits share a baseline.
+ */
+export function pixelLine(text: string, icon?: HTMLCanvasElement, color = PAL.k): HTMLCanvasElement {
+  const glyphW = text.length ? text.length * 4 - 1 : 0;
+  const gap = icon && text ? 2 : 0;
+  const h = Math.max(5, icon?.height ?? 0);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, (icon?.width ?? 0) + gap + glyphW);
+  c.height = h;
+  const g = c.getContext('2d')!;
+  if (icon) g.drawImage(icon, 0, h - icon.height);
+  drawText(g, text, (icon?.width ?? 0) + gap + glyphW / 2, h - 5, color);
+  return c;
+}
+
+// The HUD's coin, a little bigger than the one on the floor.
+export const HUD_COIN = (): HTMLCanvasElement =>
+  paint(['.kkk.', 'kyyyk', 'kywyk', 'kyyyk', '.kkk.']);
+
+/** The current hand, as a HUD icon: the finger gun plus what comes out of it. */
+export function weaponIcon(id: string): HTMLCanvasElement {
+  const hand = HAND_E.slice(2, 9).map((r) => r.slice(0, 11)); // 11 × 7, finger on row 3
+  const tip: Record<string, string[]> = {
+    finger: ['....', '....', '....', '.r..', '....', '....', '....'],
+    shotgun: ['....', '..r.', '....', '.r.r', '....', '..r.', '....'],
+    machine: ['....', '....', '....', 'y.y.', '....', '....', '....'],
+    laser: ['....', '....', '....', 'gggg', '....', '....', '....'],
+    bank: ['....', '...l', '..l.', '.l..', '....', '....', '....'],
+  };
+  const t = tip[id] ?? tip.finger;
+  return paint(hand.map((row, i) => row + t[i]));
+}
 
 export function drawText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string) {
   ctx.fillStyle = color;
