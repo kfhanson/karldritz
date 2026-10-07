@@ -38,6 +38,15 @@ const TEMPLATE = `
   <div class="ea-shell">
     <header class="ea-top">
       <p class="ea-kicker"><span class="ea-dot"></span>Hidden level</p>
+      <dl class="ea-hud" aria-live="off">
+        <div><dt>Round</dt><dd data-round>--</dd></div>
+        <div><dt>Score</dt><dd data-score>00000</dd></div>
+        <div class="ea-best"><dt>Best</dt><dd data-best>00000</dd></div>
+        <div class="ea-chips"><dt>Chips</dt><dd data-chips>000</dd></div>
+        <div class="ea-weapon"><dt>Hand</dt><dd data-weapon>Finger gun</dd></div>
+        <div class="ea-hearts" data-hearts aria-label="Health"></div>
+        <div class="ea-mult" data-mult hidden></div>
+      </dl>
       <div class="ea-actions">
         <button type="button" class="ea-chip" data-mute></button>
         <button type="button" class="ea-chip" data-exit>Back to portfolio <kbd>Esc</kbd></button>
@@ -45,19 +54,6 @@ const TEMPLATE = `
     </header>
 
     <div class="ea-stage">
-      <div class="ea-bar">
-        <h2 class="ea-title">Bug <em>Hunt</em></h2>
-        <dl class="ea-hud" aria-live="off">
-          <div><dt>Round</dt><dd data-round>--</dd></div>
-          <div><dt>Score</dt><dd data-score>00000</dd></div>
-          <div><dt>Best</dt><dd data-best>00000</dd></div>
-          <div class="ea-chips"><dt>Chips</dt><dd data-chips>000</dd></div>
-          <div class="ea-weapon"><dt>Hand</dt><dd data-weapon>Finger gun</dd></div>
-          <div class="ea-hearts" data-hearts aria-label="Health"></div>
-          <div class="ea-mult" data-mult hidden></div>
-        </dl>
-      </div>
-
       <div class="ea-frame" tabindex="-1">
         <canvas class="ea-canvas" aria-label="Bug Hunt game"></canvas>
         <div class="ea-banner" data-banner aria-live="polite"><p data-banner-title></p><span data-banner-sub></span></div>
@@ -124,6 +120,8 @@ const TEMPLATE = `
         <span><kbd>Space</kbd> dash</span>
         <span><kbd>P</kbd> pause</span>
       </p>
+
+      <p class="ea-rotate">Turn your phone sideways for a bigger room</p>
 
       <div class="ea-touch" aria-hidden="true">
         <div>

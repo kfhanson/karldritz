@@ -63,12 +63,11 @@
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 1.25rem clamp(1rem, 4vw, 4rem) 1.5rem;
+  padding: 0.9rem clamp(0.75rem, 2.5vw, 2.5rem) 0.8rem;
 }
 
 /* Entrance: everything rises in once the glass is falling away. */
 .ea-top,
-.ea-bar,
 .ea-frame,
 .ea-help {
   opacity: 0;
@@ -76,21 +75,33 @@
   transition: opacity 0.6s ease, transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .egg-arcade.is-in .ea-top { opacity: 1; transform: none; transition-delay: 0.9s; }
-.egg-arcade.is-in .ea-bar { opacity: 1; transform: none; transition-delay: 1.05s; }
 .egg-arcade.is-in .ea-frame { opacity: 1; transform: none; transition-delay: 0.6s; }
 .egg-arcade.is-in .ea-help { opacity: 1; transform: none; transition-delay: 1.4s; }
 .egg-arcade.is-fading .ea-top,
-.egg-arcade.is-fading .ea-bar,
 .egg-arcade.is-fading .ea-frame,
 .egg-arcade.is-fading .ea-help {
   transition-delay: 0s !important;
 }
 
+/* One row: label, the HUD in the middle, the buttons. The game takes the rest. */
 .ea-top {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.6rem 1.5rem;
+}
+.ea-top .ea-hud {
+  justify-content: center;
+}
+@media (max-width: 900px) {
+  .ea-top {
+    grid-template-columns: 1fr auto;
+  }
+  .ea-top .ea-hud {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: space-between;
+  }
 }
 .ea-kicker {
   margin: 0;
@@ -138,34 +149,11 @@
 .ea-stage {
   flex: 1;
   width: 100%;
-  max-width: 1120px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding-top: 1.5rem;
-}
-
-.ea-bar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.75rem 2rem;
-  margin-bottom: 1rem;
-}
-.ea-title {
-  margin: 0;
-  font-family: var(--a-display);
-  font-weight: 400;
-  font-size: clamp(2.5rem, 6vw, 4.75rem);
-  line-height: 0.9;
-  letter-spacing: -0.03em;
-}
-.ea-title em {
-  font-style: italic;
-  font-weight: 300;
-  color: var(--a-pine);
+  padding-top: 0.7rem;
 }
 
 .ea-hud {
@@ -218,7 +206,8 @@
 
 .ea-frame {
   position: relative;
-  width: min(100%, calc((100dvh - 15rem) * 320 / 184));
+  /* As big as the window allows: the header, hint line and padding take ~7rem. */
+  width: min(100%, calc((100dvh - 7rem) * 320 / 184));
   min-width: min(100%, 320px);
   aspect-ratio: 320 / 184;
   margin: 0 auto;
@@ -380,6 +369,7 @@
 
 .ea-help {
   display: flex;
+  margin-top: 0.6rem !important;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem 1.5rem;
@@ -458,7 +448,10 @@
      cards down to a title and a row of buttons. */
   .ea-stage {
     justify-content: flex-start;
-    padding-top: 2rem;
+    padding-top: 0.9rem;
+  }
+  .ea-kicker {
+    font-size: 10px;
   }
   .ea-screen {
     padding: 0.75rem;
@@ -490,7 +483,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ea-top, .ea-bar, .ea-frame, .ea-help {
+  .ea-top, .ea-frame, .ea-help {
     transform: none !important;
   }
   .ea-dot,
@@ -650,5 +643,73 @@
   }
   .ea-card span {
     display: none;
+  }
+}
+
+/* Phone on its side: every pixel of height goes to the game, and the touch
+   controls float over the bottom corners of the frame. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 520px) {
+  .ea-shell {
+    padding: 0.4rem 0.75rem;
+  }
+  .ea-top {
+    grid-template-columns: auto 1fr auto;
+  }
+  .ea-top .ea-hud {
+    grid-column: auto;
+    grid-row: auto;
+    justify-content: center;
+  }
+  .ea-kicker,
+  .ea-weapon,
+  .ea-best {
+    display: none;
+  }
+  .ea-stage {
+    padding-top: 0.4rem;
+    justify-content: flex-start;
+  }
+  .ea-frame {
+    width: min(100%, calc((100dvh - 4.6rem) * 320 / 184));
+  }
+  .ea-chip[data-mute] {
+    display: none;
+  }
+  .ea-touch button {
+    min-width: 3rem;
+    height: 3rem;
+  }
+  .ea-touch {
+    position: fixed;
+    left: 0.6rem;
+    right: 0.6rem;
+    bottom: 0.6rem;
+    margin: 0;
+    pointer-events: none;
+  }
+  .ea-touch button {
+    pointer-events: auto;
+    background: rgb(246 245 241 / 0.75) !important;
+    backdrop-filter: blur(4px);
+  }
+}
+/* Portrait phones: the game is wider than tall, so it can only be as big as
+   the phone is wide. Room to spare below — and a nudge to turn sideways. */
+.ea-rotate {
+  display: none;
+}
+@media (pointer: coarse) and (orientation: portrait) {
+  .ea-touch {
+    margin-top: 1.25rem;
+  }
+  .ea-rotate {
+    display: block;
+    margin: 1.5rem 0 0;
+    text-align: center;
+    font-family: var(--a-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--a-muted);
   }
 }
