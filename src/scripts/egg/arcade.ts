@@ -3,7 +3,8 @@
 // styles travel inside it for the same reason.
 import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
-import { Game, VIEW_H, VIEW_W, type Action, type Hud } from './game';
+import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer } from './game';
+import { WEAPONS } from './upgrades';
 import { createShardMenu, type ShardMenu, type ShardSource } from './shardmenu';
 
 const KEYS: Record<string, Action> = {
@@ -50,6 +51,8 @@ const TEMPLATE = `
           <div><dt>Round</dt><dd data-round>--</dd></div>
           <div><dt>Score</dt><dd data-score>00000</dd></div>
           <div><dt>Best</dt><dd data-best>00000</dd></div>
+          <div class="ea-chips"><dt>Chips</dt><dd data-chips>000</dd></div>
+          <div class="ea-weapon"><dt>Hand</dt><dd data-weapon>Finger gun</dd></div>
           <div class="ea-hearts" data-hearts aria-label="Health"></div>
           <div class="ea-mult" data-mult hidden></div>
         </dl>
@@ -83,6 +86,14 @@ const TEMPLATE = `
           <div class="ea-menu">
             <button type="button" data-back>Back <span>Esc</span></button>
           </div>
+        </section>
+
+        <section class="ea-screen ea-offer" data-screen="offer" hidden>
+          <p class="ea-eyebrow" data-offer-kicker></p>
+          <h3 data-offer-title></h3>
+          <p class="ea-copy" data-offer-copy></p>
+          <div class="ea-cards" data-offer-cards></div>
+          <div class="ea-menu ea-menu-row" data-offer-actions></div>
         </section>
 
         <section class="ea-screen" data-screen="paused" hidden>
@@ -187,6 +198,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       clearTimeout(bannerTimer);
       bannerTimer = setTimeout(() => banner.classList.remove('is-on'), 1700);
     },
+    offer: (o: Offer) => openOffer(o),
     over: ({ score, round, best, record }) => {
       $('[data-over-kicker]').textContent = record ? 'New best' : 'Game over';
       $('[data-over-title]').textContent = `Fell on round ${round}.`;
@@ -213,7 +225,79 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     mult.hidden = h.mult < 2;
     mult.textContent = `×${h.mult}`;
     root.classList.toggle('is-rapid', h.rapid);
+    $('[data-chips]').textContent = pad(h.chips, 3);
+    $('[data-weapon]').textContent = h.weapon;
   }
+
+  // ── Lift offers: shop, power-up, weapon, repair ──
+  const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+  let offerKeys: (() => void)[] = [];
+  function openOffer(o: Offer) {
+    const kicker = $('[data-offer-kicker]');
+    const title = $('[data-offer-title]');
+    const copy = $('[data-offer-copy]');
+    const cards = $('[data-offer-cards]');
+    const actions = $('[data-offer-actions]');
+    const card = (name: string, blurb: string, tag: string, i: number) =>
+      `<button type="button" class="ea-card" data-card="${i}"><span class="ea-card-key">${i + 1}</span><strong>${esc(name)}</strong><span>${esc(blurb)}</span><em>${esc(tag)}</em></button>`;
+    const done = () => {
+      offerKeys = [];
+      show(null);
+      game.finishOffer();
+    };
+    offerKeys = [];
+    actions.innerHTML = '';
+    if (o.kind === 'perk' && o.perks) {
+      kicker.textContent = 'Power-up';
+      title.textContent = 'Pick one.';
+      copy.textContent = 'It lasts for the rest of the run.';
+      cards.innerHTML = o.perks.map((p, i) => card(p.name, p.blurb, 'Free', i)).join('');
+      offerKeys = o.perks.map((p) => () => (game.takePerk(p), done()));
+    } else if (o.kind === 'weapon' && o.weapons) {
+      kicker.textContent = 'Weapon';
+      title.textContent = 'Swap your hand.';
+      copy.textContent = `Now holding: ${WEAPONS[game.weaponId].name}. Take one, or keep it.`;
+      cards.innerHTML = o.weapons.map((w, i) => card(w.name, w.blurb, w.pellets > 1 ? `${w.pellets} shots` : `${w.dmg} dmg`, i)).join('');
+      offerKeys = o.weapons.map((w) => () => (game.takeWeapon(w.id), done()));
+      actions.innerHTML = '<button type="button" data-offer-leave>Keep my hand <span>Esc</span></button>';
+    } else if (o.kind === 'shop' && o.shop) {
+      kicker.textContent = 'Shop';
+      title.textContent = 'Spend your chips.';
+      const items = o.shop;
+      const sold = new Set<number>();
+      const paint = () => {
+        copy.textContent = `You have ${game.funds} chips.`;
+        cards.innerHTML = items
+          .map((it, i) => card(it.name, it.blurb, sold.has(i) ? 'Sold' : `${it.price} chips`, i))
+          .join('');
+        cards.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((b, i) => {
+          b.disabled = sold.has(i) || game.funds < items[i].price;
+        });
+      };
+      offerKeys = items.map((it, i) => () => {
+        if (sold.has(i) || !game.buy(it)) return;
+        sold.add(i);
+        paint();
+      });
+      paint();
+      actions.innerHTML = '<button type="button" data-offer-leave>Leave the shop <span>Esc</span></button>';
+    } else {
+      kicker.textContent = 'Repair bay';
+      title.textContent = 'Good as new.';
+      game.repair();
+      copy.textContent = 'Fully repaired, and 10 chips found down the back of the lift.';
+      cards.innerHTML = '';
+      actions.innerHTML = '<button type="button" data-offer-leave>Back to the floor <span>Enter</span></button>';
+    }
+    cards.onclick = (e) => {
+      const b = (e.target as Element).closest<HTMLButtonElement>('[data-card]');
+      if (b && !b.disabled) offerKeys[Number(b.dataset.card)]?.();
+    };
+    actions.onclick = (e) => (e.target as Element).closest('[data-offer-leave]') && done();
+    leaveOffer = done;
+    show('offer');
+  }
+  let leaveOffer: (() => void) | null = null;
 
   // ── The start menu: glass shards when the browser can draw them ──
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -326,6 +410,15 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       if (down && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), pause());
     }
     if (!down) return;
+    if (game.mode === 'offer') {
+      const n = /^Digit([1-9])$/.exec(e.code);
+      if (n) return void (e.preventDefault(), offerKeys[Number(n[1]) - 1]?.());
+      const leaveBtn = root.querySelector('[data-offer-leave]');
+      if ((e.code === 'Escape' || (e.code === 'Enter' && !(document.activeElement instanceof HTMLButtonElement))) && leaveBtn) {
+        return void (e.preventDefault(), leaveOffer?.());
+      }
+      if (e.code === 'Escape') return void e.preventDefault(); // a power-up must be picked
+    }
     if (e.code === 'KeyM') return void (setMuted(!isMuted()), syncMute());
     if (game.mode === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), resume());
     if (e.code === 'Escape') {

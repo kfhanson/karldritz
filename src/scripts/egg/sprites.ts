@@ -262,6 +262,14 @@ export function buildSprites() {
     flyer: [sprite(FLYER_UP), sprite(FLYER_DOWN)],
     brute: BRUTE_LEGS.map((legs) => sprite([...BRUTE, ...legs])),
     heart: sprite(HEART),
+    chip: sprite(['.yy.', 'ywyy', 'yyyy', '.yy.']),
+    // Signs over the lifts after a boss.
+    signs: {
+      shop: sprite(['.yyy.', 'yykyy', 'ykyyy', 'yykyy', 'yyyky', 'yykyy', '.yyy.']),
+      perk: sprite(['...y...', '..yyy..', 'yyyyyyy', '.yyyyy.', '..yyy..', '.yy.yy.', 'y.....y']),
+      weapon: sprite(['..k....', '.kck...', 'kcckkkk', 'kcccccc', 'kcwkkkk', '.kkk...']),
+      repair: sprite(['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...']),
+    },
     bolt: sprite(BOLT),
   };
 }

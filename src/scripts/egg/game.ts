@@ -9,6 +9,7 @@
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
 import { burst, tone } from './audio';
 import { BOT_VIEW, buildSprites, drawText, HAND_ANGLES, PAL, type Sprite, type Sprites } from './sprites';
+import { freshLoadout, liftKinds, LIFT_LABEL, makeOffer, WEAPONS, type Ctx, type Loadout, type Offer, type OfferKind } from './upgrades';
 
 export const VIEW_W = 320;
 export const VIEW_H = 184;
@@ -57,7 +58,6 @@ const DOORS: { x: number; y: number; side: DoorSide }[] = [
 ];
 
 const STEP = 1 / 60;
-const MAX_HP = 5;
 const SPEED = 80;
 const DASH_SPEED = 250;
 const DASH_TIME = 0.17;
@@ -130,6 +130,12 @@ interface Bullet {
   vx: number;
   vy: number;
   life: number;
+  dmg: number;
+  pierce: number; // bugs it can still pass through
+  bounce: number; // walls it can still bounce off
+  size: number;
+  color: string;
+  hit: Set<Enemy>; // already struck, so a piercing shot doesn't hit twice
 }
 
 interface Particle {
@@ -145,7 +151,8 @@ interface Particle {
 }
 
 interface Pickup extends Body {
-  kind: 'heart' | 'bolt';
+  kind: 'heart' | 'bolt' | 'chip';
+  value: number; // chips
   life: number;
 }
 
@@ -167,13 +174,19 @@ export interface Hud {
   maxHp: number;
   mult: number;
   rapid: boolean;
+  chips: number;
+  weapon: string;
 }
 
 export interface Hooks {
   hud(h: Hud): void;
   banner(title: string, sub?: string): void;
   over(result: { score: number; round: number; best: number; record: boolean }): void;
+  /** The player stepped into a lift: show its choices; call finishOffer() when done. */
+  offer(o: Offer): void;
 }
+
+export type { Offer } from './upgrades';
 
 export type Action = 'left' | 'right' | 'up' | 'down' | 'jump' | 'fire';
 
@@ -230,7 +243,7 @@ const blocked = (x: number, y: number, r: number) =>
   PROPS.some((p) => x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r);
 
 export class Game {
-  mode: 'attract' | 'play' | 'paused' | 'over' = 'attract';
+  mode: 'attract' | 'play' | 'paused' | 'over' | 'offer' = 'attract';
 
   private ctx: CanvasRenderingContext2D;
   private sprites: Sprites = buildSprites();
@@ -254,7 +267,11 @@ export class Game {
   private doors: Door[] = DOORS.map((d) => ({ ...d, charge: 0, queue: null, open: 0, hold: 0 }));
 
   private round = 0;
-  private phase: 'intro' | 'fight' | 'clear' = 'intro';
+  private phase: 'intro' | 'fight' | 'clear' | 'lifts' | 'riding' | 'arriving' = 'intro';
+  private loadout: Loadout = freshLoadout();
+  private chips = 0;
+  private lifts: OfferKind[] = []; // what each back lift leads to, left to right, after a boss
+  private ride = -1; // which back door the player is riding
   private phaseT = 0;
   private toSpawn: Kind[] = [];
   private spawnT = 0;
@@ -299,10 +316,14 @@ export class Game {
     this.combo = 0;
     this.comboT = 0;
     this.deadT = 0;
+    this.chips = 0;
+    this.loadout = freshLoadout();
+    this.lifts = [];
+    this.ride = -1;
     this.held.clear();
     this.player = {
       x: 160, y: 118, z: 0, vx: 0, vy: 0, vz: 0, r: 4,
-      lx: 0, ly: 1, kick: 0, blink: 2, hp: MAX_HP, inv: 0, cool: 0, rapid: 0,
+      lx: 0, ly: 1, kick: 0, blink: 2, hp: this.loadout.maxHp, inv: 0, cool: 0, rapid: 0,
       dash: 0, dashCool: 0, dx: 1, dy: 0, anim: 0, dead: false,
     };
     this.mode = 'play';
@@ -364,6 +385,7 @@ export class Game {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     if (this.mode === 'paused') return;
+    if (this.mode === 'offer') return void this.render();
     this.acc += dt;
     let steps = 0;
     while (this.acc >= STEP && steps++ < 5) {
@@ -443,14 +465,112 @@ export class Game {
         }
       }
       if (!this.toSpawn.length && !this.queued() && !this.enemies.length) {
-        this.phase = 'clear';
-        this.phaseT = 2.4;
-        const healed = p.hp < MAX_HP;
-        p.hp = Math.min(MAX_HP, p.hp + 1);
-        this.hooks.banner(`Round ${this.round} cleared`, healed ? '+1 heart' : 'Full health');
+        const healed = p.hp < this.loadout.maxHp;
+        p.hp = Math.min(this.loadout.maxHp, p.hp + 1);
         [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.14, 0.08, 'triangle', i * 0.09));
+        if (this.round % 5 === 0) {
+          // After a boss, the back lifts open, each going somewhere different.
+          this.phase = 'lifts';
+          this.lifts = liftKinds();
+          this.hooks.banner('Boss down', `Take a lift: ${this.lifts.map((k) => LIFT_LABEL[k]).join(' · ')}`);
+        } else {
+          this.phase = 'clear';
+          this.phaseT = 2.4;
+          this.hooks.banner(`Round ${this.round} cleared`, healed ? '+1 heart' : 'Full health');
+        }
       }
     } else if (this.phase === 'clear' && this.phaseT <= 0) this.startRound(this.round + 1);
+    else if (this.phase === 'lifts') {
+      // Walk into an open lift to take it.
+      const back = this.doors.filter((d) => d.side === 'back');
+      back.forEach((d) => ((d.open = Math.min(1, d.open + dt * 3)), (d.hold = 1)));
+      const k = back.findIndex((d) => Math.abs(p.x - d.x) < 8 && p.y <= ARENA.y0 + 3);
+      if (k >= 0) {
+        this.phase = 'riding';
+        this.phaseT = 0.75;
+        this.ride = k;
+        p.x = back[k].x;
+        p.vx = p.vy = 0;
+        this.held.clear();
+        tone(1175, 1175, 0.15, 0.05, 'sine');
+      }
+    } else if (this.phase === 'riding') {
+      // In, doors shut, up it goes.
+      const back = this.doors.filter((d) => d.side === 'back');
+      back.forEach((d, i) => (d.open = Math.max(0, d.open - dt * (i === this.ride ? 2.2 : 4))));
+      if (this.phaseT <= 0) {
+        const kind = this.lifts[this.ride];
+        this.mode = 'offer';
+        this.hooks.offer(makeOffer(kind, this.loadout, this.chips, this.round / 5));
+      }
+    } else if (this.phase === 'arriving') {
+      // Back down: the doors open and out it steps.
+      const d = this.doors.filter((x) => x.side === 'back')[this.ride];
+      d.open = Math.min(1, d.open + dt * 2.5);
+      if (this.phaseT <= 0) {
+        d.hold = 0.3;
+        this.ride = -1;
+        this.startRound(this.round + 1);
+      }
+    }
+  }
+
+  // ── Lifts: what the arcade calls while an offer is open ──
+  private upCtx(): Ctx {
+    const p = this.player!;
+    return { l: this.loadout, heal: (n) => (p.hp = Math.min(this.loadout.maxHp, p.hp + n)) };
+  }
+
+  get funds() {
+    return this.chips;
+  }
+
+  get weaponId() {
+    return this.loadout.weapon;
+  }
+
+  /** Spend chips on a shop item. Returns false if they can't afford it. */
+  buy(item: { price: number; apply(c: Ctx): void }): boolean {
+    if (this.chips < item.price) return false;
+    this.chips -= item.price;
+    item.apply(this.upCtx());
+    this.pushHud();
+    tone(880, 1760, 0.1, 0.06, 'triangle');
+    return true;
+  }
+
+  takePerk(perk: { apply(c: Ctx): void }) {
+    perk.apply(this.upCtx());
+    this.pushHud();
+  }
+
+  takeWeapon(id: string) {
+    this.loadout.weapon = id;
+    this.pushHud();
+  }
+
+  repair() {
+    const p = this.player!;
+    p.hp = this.loadout.maxHp;
+    this.chips += 10;
+    this.pushHud();
+  }
+
+  /** Back to the room, out of the lift the player took. */
+  finishOffer() {
+    if (this.mode !== 'offer') return;
+    const p = this.player!;
+    const d = this.doors.filter((x) => x.side === 'back')[this.ride];
+    p.x = d.x;
+    p.y = ARENA.y0 + 8;
+    p.inv = 1.2;
+    p.cool = 0.3;
+    this.mode = 'play';
+    this.phase = 'arriving';
+    this.phaseT = 0.6;
+    this.last = performance.now();
+    this.pushHud();
+    tone(1175, 1175, 0.12, 0.05, 'sine');
   }
 
   private updateAttract(dt: number) {
@@ -560,7 +680,7 @@ export class Game {
     p.dashCool -= dt;
     if (this.dashPressed && p.dashCool <= 0 && p.dash <= 0) {
       p.dash = DASH_TIME;
-      p.dashCool = DASH_COOL;
+      p.dashCool = DASH_COOL * this.loadout.dashCool;
       [p.dx, p.dy] = il ? [ix, iy] : [p.lx, p.ly];
       p.inv = Math.max(p.inv, DASH_TIME + 0.05);
       tone(300, 900, 0.1, 0.06, 'triangle');
@@ -589,14 +709,29 @@ export class Game {
 
     p.cool -= dt;
     if (h.has('fire') && p.cool <= 0 && p.dash <= 0) {
-      p.cool = p.rapid > 0 ? 0.08 : 0.16;
+      const l = this.loadout;
+      const w = WEAPONS[l.weapon];
+      p.cool = w.cool * l.rate * (p.rapid > 0 ? 0.5 : 1);
       p.kick = 0.08;
-      // Out of the fingertip.
+      // Out of the fingertip, fanned when there's more than one.
       const bx = p.x + aim.x * (HAND_R + 4.5);
       const by = p.y + aim.y * (HAND_R + 4.5);
-      this.bullets.push({ x: bx, y: by, vx: aim.x * BULLET, vy: aim.y * BULLET, life: 1.2 });
+      const n = w.pellets + l.extra;
+      const fan = n > 1 ? Math.max(w.spread, 0.16 * (n - 1)) : 0;
+      const base = Math.atan2(aim.y, aim.x);
+      for (let k = 0; k < n; k++) {
+        const a = base + (n > 1 ? -fan / 2 + (fan * k) / (n - 1) : rand(-w.spread, w.spread) / 2);
+        const sp = w.speed * (w.pellets > 1 ? rand(0.85, 1.1) : 1);
+        this.bullets.push({
+          x: bx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: w.life * (w.pellets > 1 ? rand(0.8, 1.15) : 1),
+          dmg: w.dmg + l.dmg, pierce: w.pierce + l.pierce, bounce: w.bounce, size: w.size, color: w.color, hit: new Set(),
+        });
+      }
       this.particles.push({ x: bx, y: by, z: GUN_Z, vx: aim.x * 30, vy: aim.y * 30, vz: 0, life: 0.06, max: 0.06, color: PAL.y });
-      tone(900, 480, 0.05, 0.04, 'square');
+      if (w.id === 'shotgun') burst(0.12, 700, 0.3, 'lowpass');
+      else if (w.id === 'laser') tone(1400, 300, 0.12, 0.05, 'sawtooth');
+      else tone(w.id === 'machine' ? 1100 : 900, 480, 0.05, 0.04, 'square');
+      if (w.id === 'shotgun') (p.vx -= aim.x * 60), (p.vy -= aim.y * 60);
     }
     p.inv -= dt;
     p.rapid -= dt;
@@ -753,8 +888,8 @@ export class Game {
     }
   }
 
-  private hitEnemy(e: Enemy, dx: number, dy: number) {
-    e.hp -= 1;
+  private hitEnemy(e: Enemy, dx: number, dy: number, dmg = 1) {
+    e.hp -= dmg;
     e.flash = 0.07;
     const heavy = e.kind === 'brute' || e.kind === 'boss';
     e.vx += dx * (heavy ? 20 : 110);
@@ -776,10 +911,25 @@ export class Game {
     burst(0.12, 900, 0.25, 'lowpass');
 
     const p = this.player;
+    if (!p) return;
+    const l = this.loadout;
+    // Chips: a few coins that hop out and roll toward the player.
+    const worth = Math.round({ crawler: 1, flyer: 1, brute: 3, boss: 15 }[e.kind] * l.chipMult);
+    const coins = Math.min(worth, 5);
+    for (let k = 0; k < coins; k++) {
+      const a = rand(0, Math.PI * 2);
+      const value = k < coins - 1 ? 1 : worth - (coins - 1);
+      this.pickups.push({ kind: 'chip', value, x: e.x, y: e.y, z: 4, vx: Math.cos(a) * rand(20, 60), vy: Math.sin(a) * rand(15, 40), vz: rand(60, 120), r: 3, life: 12 });
+    }
+    l.kills += 1;
+    if (l.vampire && l.kills % l.vampire === 0 && p.hp < l.maxHp) {
+      p.hp += 1;
+      this.pops.push({ x: p.x, y: p.y - 20, text: '+1', life: 0.8 });
+    }
     const drop = e.kind === 'boss' || Math.random() < (heavy ? 0.3 : 0.06);
-    if (p && drop) {
-      const kind = e.kind === 'boss' || (p.hp < MAX_HP && Math.random() < 0.6) ? 'heart' : 'bolt';
-      this.pickups.push({ kind, x: e.x, y: e.y, z: 6, vx: 0, vy: 0, vz: 90, r: 4, life: 9 });
+    if (drop) {
+      const kind = e.kind === 'boss' || (p.hp < l.maxHp && Math.random() < 0.6) ? 'heart' : 'bolt';
+      this.pickups.push({ kind, value: 0, x: e.x, y: e.y, z: 6, vx: 0, vy: 0, vz: 90, r: 4, life: 9 });
     }
   }
 
@@ -793,6 +943,17 @@ export class Game {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
+      const outX = b.x < ARENA.x0 || b.x > ARENA.x1;
+      const outY = b.y < FLOOR_TOP || b.y > FRONT;
+      if ((outX || outY) && b.bounce > 0) {
+        // Bank shot: off the wall and away again.
+        b.bounce -= 1;
+        if (outX) (b.vx = -b.vx), (b.x = clamp(b.x, ARENA.x0, ARENA.x1));
+        if (outY) (b.vy = -b.vy), (b.y = clamp(b.y, FLOOR_TOP, FRONT));
+        b.hit.clear();
+        this.puff(b.x, b.y, 2, PAL.l, GUN_Z);
+        tone(1600, 1200, 0.03, 0.03, 'triangle');
+      }
       const wall = b.x < ARENA.x0 || b.x > ARENA.x1 || b.y < FLOOR_TOP || b.y > FRONT;
       const hitProp = PROPS.some((p) => p.stopsShots && b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h + 2);
       if (wall || hitProp) {
@@ -800,12 +961,17 @@ export class Game {
         this.puff(b.x, b.y, 3, PAL.m, GUN_Z);
         continue;
       }
+      const speed = Math.hypot(b.vx, b.vy) || 1;
       for (const e of this.enemies) {
-        if (e.hp <= 0) continue;
-        if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 1.5) {
-          this.hitEnemy(e, b.vx / BULLET, b.vy / BULLET);
-          b.life = 0;
-          break;
+        if (e.hp <= 0 || b.hit.has(e)) continue;
+        if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 1 + b.size / 2) {
+          this.hitEnemy(e, b.vx / speed, b.vy / speed, b.dmg);
+          b.hit.add(e);
+          if (b.pierce > 0) b.pierce -= 1;
+          else {
+            b.life = 0;
+            break;
+          }
         }
       }
     }
@@ -819,9 +985,27 @@ export class Game {
       k.vz -= 400 * dt;
       k.z = Math.max(0, k.z + k.vz * dt);
       if (k.z === 0) k.vz = Math.abs(k.vz) > 30 ? -k.vz * 0.4 : 0;
-      if (p && !p.dead && Math.hypot(p.x - k.x, p.y - k.y) < p.r + k.r) {
+      // Chips roll to the player once they've landed (anything does, with the magnet).
+      const d = p && !p.dead ? Math.hypot(p.x - k.x, p.y - k.y) : Infinity;
+      // Chips always come home once they've landed; hearts and bolts only to the magnet.
+      const homing = k.kind === 'chip' ? k.life < 11.4 : this.loadout.magnet && d < 120;
+      if (p && homing && d > 0.5) {
+        const sp = k.kind === 'chip' ? (this.loadout.magnet ? 260 : 170) : 140;
+        k.vx += ((p.x - k.x) / d) * sp * dt * 8;
+        k.vy += ((p.y - k.y) / d) * sp * dt * 8;
+      }
+      k.vx *= 1 - Math.min(1, dt * 4);
+      k.vy *= 1 - Math.min(1, dt * 4);
+      k.x += k.vx * dt;
+      k.y += k.vy * dt;
+      if (p && !p.dead && d < p.r + k.r) {
         k.life = 0;
-        if (k.kind === 'heart') p.hp = Math.min(MAX_HP, p.hp + 1);
+        if (k.kind === 'chip') {
+          this.chips += k.value;
+          tone(1568 + Math.random() * 200, 2093, 0.05, 0.03, 'triangle');
+          continue;
+        }
+        if (k.kind === 'heart') p.hp = Math.min(this.loadout.maxHp, p.hp + 1);
         else p.rapid = 6;
         this.puff(k.x, k.y, 8, k.kind === 'heart' ? PAL.r : PAL.y, 4);
         tone(660, 1320, 0.12, 0.07, 'triangle');
@@ -883,7 +1067,9 @@ export class Game {
       score: this.score,
       best: Math.max(this.best, this.score),
       hp: p ? Math.max(0, p.hp) : 0,
-      maxHp: MAX_HP,
+      maxHp: this.loadout.maxHp,
+      chips: this.chips,
+      weapon: WEAPONS[this.loadout.weapon].name,
       mult: this.mult(),
       rapid: !!p && p.rapid > 0,
     };
@@ -1044,8 +1230,19 @@ export class Game {
           c.fillRect(d.x - 8, FLOOR_TOP - 23, 1, 23);
           c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, 1, 23);
         }
-        c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
-        c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
+        const k = this.doors.filter((x) => x.side === 'back').indexOf(d);
+        const kind = (this.phase === 'lifts' || this.phase === 'riding' || this.mode === 'offer') ? this.lifts[k] : undefined;
+        if (kind) {
+          // Where this lift goes, bobbing over the door.
+          const sign = this.sprites.signs[kind === 'perk' ? 'perk' : kind];
+          const bob = Math.floor(this.time * 3 + k) % 2;
+          c.fillStyle = 'rgba(246,245,241,0.9)';
+          c.fillRect(d.x - 6, WALL_TOP + 1, 12, 9);
+          c.drawImage(sign.right, Math.round(d.x - sign.w / 2), WALL_TOP + 2 + bob);
+        } else {
+          c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
+          c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
+        }
       } else {
         // Side doors: a leaf that swings open into the wall's thickness.
         const x = d.side === 'left' ? 1 : VIEW_W - SIDE + 1;
@@ -1090,7 +1287,9 @@ export class Game {
     // Shadows first, all on the floor.
     for (const e of this.enemies) this.shadow(e.x, e.y, e.r, e.z);
     for (const k of this.pickups) this.shadow(k.x, k.y, 3, k.z);
-    const p = this.player && !this.player.dead ? this.player : null;
+    // Hidden while it rides a lift.
+    const inLift = this.phase === 'riding' && this.phaseT < 0.45;
+    const p = this.player && !this.player.dead && this.mode !== 'offer' && !inLift ? this.player : null;
     if (p) this.shadow(p.x, p.y, 4);
     for (const b of this.bullets) {
       c.fillStyle = 'rgba(17,17,17,0.18)';
@@ -1102,7 +1301,7 @@ export class Game {
     for (const pr of PROPS) items.push({ y: pr.y + pr.h, draw: () => this.drawProp(pr) });
     for (const k of this.pickups) {
       if (k.life < 2 && Math.floor(k.life * 10) % 2) continue;
-      const s = k.kind === 'heart' ? sp.heart : sp.bolt;
+      const s = k.kind === 'chip' ? sp.chip : k.kind === 'heart' ? sp.heart : sp.bolt;
       items.push({ y: k.y, draw: () => this.draw(s, k.x - s.w / 2, k.y - k.z - s.h - Math.sin(this.time * 6), 1) });
     }
     for (const e of this.enemies) {
@@ -1169,10 +1368,15 @@ export class Game {
     // Shots and sparks on top.
     for (const b of this.bullets) {
       const sy = b.y - GUN_Z;
-      c.fillStyle = PAL.r;
-      c.fillRect(Math.round(b.x - 1), Math.round(sy - 1), 2, 2);
+      const sp2 = Math.hypot(b.vx, b.vy) || 1;
+      const h = Math.floor(b.size / 2);
+      c.fillStyle = b.color;
+      c.fillRect(Math.round(b.x - h), Math.round(sy - h), b.size, b.size);
       c.fillStyle = PAL.y;
-      c.fillRect(Math.round(b.x - (b.vx / BULLET) * 2), Math.round(sy - (b.vy / BULLET) * 2), 1, 1);
+      const tail = b.size >= 3 ? 5 : 2; // the laser leaves a longer streak
+      for (let t = 1; t <= tail; t += b.size >= 3 ? 1 : tail) {
+        c.fillRect(Math.round(b.x - (b.vx / sp2) * (t + h)), Math.round(sy - (b.vy / sp2) * (t + h)), 1, 1);
+      }
     }
     for (const q of this.particles) {
       c.globalAlpha = Math.min(1, (q.life / q.max) * 1.5);
