@@ -8,7 +8,7 @@
 // the floor. Everything is drawn back to front by its y.
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
 import { burst, tone } from './audio';
-import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
+import { BOT_VIEW, buildSprites, drawText, HAND_ANGLES, PAL, type Sprite, type Sprites } from './sprites';
 
 export const VIEW_W = 320;
 export const VIEW_H = 184;
@@ -63,7 +63,8 @@ const DASH_SPEED = 250;
 const DASH_TIME = 0.17;
 const DASH_COOL = 0.65;
 const BULLET = 300;
-const GUN_Z = 7; // shots fly at chest height
+const GUN_Z = 6; // shots fly at hand height
+const HAND_R = 5; // how far the gun hand floats from the body
 
 // Office colours, kept to the site palette plus glass and steel.
 const WALL = '#F1EFE9';
@@ -91,8 +92,10 @@ interface Body {
 }
 
 interface Player extends Body {
-  face: 1 | -1;
-  back: boolean; // aiming up the room: show the robot from behind
+  lx: number; // where it's looking (unit vector): aim, or the way it last moved
+  ly: number;
+  kick: number; // recoil on the gun hand
+  blink: number; // seconds to the next blink (negative while blinking)
   hp: number;
   inv: number;
   cool: number;
@@ -299,7 +302,7 @@ export class Game {
     this.held.clear();
     this.player = {
       x: 160, y: 118, z: 0, vx: 0, vy: 0, vz: 0, r: 4,
-      face: 1, back: false, hp: MAX_HP, inv: 0, cool: 0, rapid: 0,
+      lx: 0, ly: 1, kick: 0, blink: 2, hp: MAX_HP, inv: 0, cool: 0, rapid: 0,
       dash: 0, dashCool: 0, dx: 1, dy: 0, anim: 0, dead: false,
     };
     this.mode = 'play';
@@ -520,7 +523,7 @@ export class Game {
 
   // ── Player ──
   private gun(p: Player) {
-    return { x: p.x, y: p.y - GUN_Z }; // on screen
+    return { x: p.x, y: p.y - GUN_Z }; // the shoulder, on screen
   }
 
   private aimDir(p: Player): { x: number; y: number } {
@@ -539,11 +542,11 @@ export class Game {
         if (e.hp > 0 && d < best) [best, tx, ty] = [d, ex, ey];
       }
     }
-    if (tx === null) return { x: p.face, y: 0 };
+    if (tx === null) return { x: p.lx, y: p.ly };
     const dx = tx - g.x;
     const dy = ty - g.y;
     const d = Math.hypot(dx, dy);
-    return d < 1 ? { x: p.face, y: 0 } : { x: dx / d, y: dy / d };
+    return d < 4 ? { x: p.lx, y: p.ly } : { x: dx / d, y: dy / d };
   }
 
   private updatePlayer(p: Player, dt: number) {
@@ -558,7 +561,7 @@ export class Game {
     if (this.dashPressed && p.dashCool <= 0 && p.dash <= 0) {
       p.dash = DASH_TIME;
       p.dashCool = DASH_COOL;
-      [p.dx, p.dy] = il ? [ix, iy] : [p.face, 0];
+      [p.dx, p.dy] = il ? [ix, iy] : [p.lx, p.ly];
       p.inv = Math.max(p.inv, DASH_TIME + 0.05);
       tone(300, 900, 0.1, 0.06, 'triangle');
     }
@@ -577,20 +580,20 @@ export class Game {
     p.y += p.vy * dt;
     collide(p);
 
+    if (this.aimMode === 'facing' && il) [p.lx, p.ly] = [ix, iy];
     const aim = this.aimDir(p);
-    if (this.aimMode !== 'facing') {
-      if (Math.abs(aim.x) > 0.05) p.face = aim.x < 0 ? -1 : 1;
-      p.back = aim.y < -0.55;
-    } else {
-      if (ix) p.face = ix < 0 ? -1 : 1;
-      p.back = iy < 0 && !ix;
-    }
+    if (this.aimMode !== 'facing') [p.lx, p.ly] = [aim.x, aim.y];
+    p.kick = Math.max(0, p.kick - dt);
+    p.blink -= dt;
+    if (p.blink < -0.13) p.blink = rand(2, 4.5);
 
     p.cool -= dt;
     if (h.has('fire') && p.cool <= 0 && p.dash <= 0) {
       p.cool = p.rapid > 0 ? 0.08 : 0.16;
-      const bx = p.x + aim.x * 6;
-      const by = p.y + aim.y * 6;
+      p.kick = 0.08;
+      // Out of the fingertip.
+      const bx = p.x + aim.x * (HAND_R + 4.5);
+      const by = p.y + aim.y * (HAND_R + 4.5);
       this.bullets.push({ x: bx, y: by, vx: aim.x * BULLET, vy: aim.y * BULLET, life: 1.2 });
       this.particles.push({ x: bx, y: by, z: GUN_Z, vx: aim.x * 30, vy: aim.y * 30, vz: 0, life: 0.06, max: 0.06, color: PAL.y });
       tone(900, 480, 0.05, 0.04, 'square');
@@ -1118,22 +1121,44 @@ export class Game {
       items.push({
         y: p.y,
         draw: () => {
-          const b = sp.bot;
+          // Body: one of eight views, from where it's looking.
+          const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
+          const [view, mirror] = BOT_VIEW[oct];
+          const f = sp.bot[view];
           const moving = Math.hypot(p.vx, p.vy) > 10;
-          const step = Math.floor(p.anim / 7) % 2;
-          const s = p.back ? (moving ? (step ? b.backA : b.backB) : b.back) : moving ? (step ? b.runA : b.runB) : b.idle;
+          const step = Math.floor(p.anim / 6) % 2;
+          const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
+          // A bob: on every step, or a slow breath when standing.
+          const bob = moving ? (step ? -1 : 0) : Math.floor(this.time * 1.6) % 2 ? -1 : 0;
+          const bx = Math.round(p.x - s.w / 2);
+          const by = Math.round(p.y - s.h + 1 + bob);
+
+          // Gun hand: a finger gun, pointing where it aims, kicking back on a shot.
           const aim = this.aimDir(p);
           const g = this.gun(p);
-          const gun = () => {
-            c.fillStyle = PAL.k;
-            for (let d = 2; d <= 6; d++) c.fillRect(Math.round(g.x + aim.x * d), Math.round(g.y + aim.y * d), 1, 1);
-          };
-          if (p.back) gun(); // held in front, so behind the robot when facing away
-          this.draw(s, p.x - s.w / 2, p.y - s.h + 1, p.face);
-          if (!p.back) gun();
+          const reach = HAND_R - (p.kick / 0.08) * 2;
+          const hk = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * HAND_ANGLES) + HAND_ANGLES) % HAND_ANGLES;
+          const hand = () => c.drawImage(sp.hands[hk], Math.round(g.x + aim.x * reach) - 5, Math.round(g.y + aim.y * reach + bob) - 5);
+          // The other hand hangs at the far side, swinging as it walks.
+          const side = Math.abs(aim.x) > 0.25 ? -Math.sign(aim.x) : oct === 6 ? 1 : -1;
+          const swing = moving ? (step ? 1 : -1) : 0;
+          const mitten = () => this.draw(sp.mitten, Math.round(p.x + side * 6 - 2), Math.round(p.y - 6 + bob + swing), 1);
+
+          const handBehind = aim.y < -0.35; // pointing up the room: the body is in front of it
+          const mittenBehind = view === 'e' || view === 'ne' || view === 'n';
+          if (handBehind) hand();
+          if (mittenBehind) mitten();
+          this.draw(s, bx, by, mirror ? -1 : 1);
+          if (!mittenBehind) mitten();
+          if (!handBehind) hand();
+
+          // Rapid fire: the antenna bulb blinks.
           if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
-            c.fillStyle = PAL.y;
-            c.fillRect(Math.round(p.x - 1), Math.round(p.y - s.h - 3), 2, 1);
+            const col = { s: 6, se: 5, e: 5, ne: 7, n: 6 }[view];
+            c.fillStyle = PAL.r;
+            c.fillRect(bx + (mirror ? 12 - col : col), by, 1, 1);
+            c.fillStyle = 'rgba(217,164,65,0.6)';
+            c.fillRect(bx + (mirror ? 12 - col : col) - 1, by - 1, 3, 1);
           }
         },
       });
