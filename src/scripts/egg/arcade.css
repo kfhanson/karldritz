@@ -741,11 +741,11 @@
   }
 }
 
-/* Pixel type: the game's text in pixel faces to match the art. Pixelify Sans
-   for titles and copy, Silkscreen for small labels and key hints. */
+/* Pixel type for the game's voice — titles, banners, buttons, labels — in
+   Pixelify Sans and Silkscreen, to match the art. Descriptive copy stays in
+   Inter, where reading matters more than flavour. */
 .egg-arcade[data-type='pixel'] {
   --a-display: 'Pixelify Sans', 'Silkscreen', ui-monospace, monospace;
-  --a-sans: 'Pixelify Sans', ui-monospace, monospace;
   --a-mono: 'Silkscreen', 'Pixelify Sans', ui-monospace, monospace;
   -webkit-font-smoothing: none;
   font-variant-ligatures: none; /* its fi/fl ligatures look broken at pixel sizes */
@@ -764,19 +764,13 @@
 .egg-arcade[data-type='pixel'] .ea-kicker {
   letter-spacing: 0.04em;
 }
-/* Pixel faces run small and thin: body copy a step heavier and larger,
-   labels a size up, so the small print stays easy to read. */
-.egg-arcade[data-type='pixel'] .ea-copy,
-.egg-arcade[data-type='pixel'] .ea-keys li,
-.egg-arcade[data-type='pixel'] .ea-card span,
-.egg-arcade[data-type='pixel'] .ea-help,
+/* Buttons speak in the game's voice too; pixel faces run thin, so a step
+   heavier. Labels a size up, so the small print stays easy to read. */
 .egg-arcade[data-type='pixel'] .ea-chip,
 .egg-arcade[data-type='pixel'] .ea-menu button {
+  font-family: var(--a-display);
   font-weight: 500;
   font-size: 1.06em;
-}
-.egg-arcade[data-type='pixel'] .ea-card span {
-  color: #55554f;
 }
 .egg-arcade[data-type='pixel'] .ea-eyebrow,
 .egg-arcade[data-type='pixel'] .ea-banner span,
