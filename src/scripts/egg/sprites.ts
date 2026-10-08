@@ -139,14 +139,16 @@ const GLYPHS: Record<string, string> = {
  * A row of pixel art for the HUD: optional icon, then 3×5 digits, at 1px per
  * pixel (CSS scales it up with crisp edges). Icon and digits share a baseline.
  */
-export function pixelLine(text: string, icon?: HTMLCanvasElement, color = PAL.k): HTMLCanvasElement {
+export function pixelLine(text: string, icon?: HTMLCanvasElement, color = PAL.k, into?: HTMLCanvasElement): HTMLCanvasElement {
   const glyphW = text.length ? text.length * 4 - 1 : 0;
   const gap = icon && text ? 2 : 0;
   const h = Math.max(5, icon?.height ?? 0);
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, (icon?.width ?? 0) + gap + glyphW);
-  c.height = h;
+  const w = Math.max(1, (icon?.width ?? 0) + gap + glyphW);
+  const c = into ?? document.createElement('canvas');
+  if (c.width !== w) c.width = w; // resizing also clears
+  if (c.height !== h) c.height = h;
   const g = c.getContext('2d')!;
+  g.clearRect(0, 0, w, h);
   if (icon) g.drawImage(icon, 0, h - icon.height);
   drawText(g, text, (icon?.width ?? 0) + gap + glyphW / 2, h - 5, color);
   return c;

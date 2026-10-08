@@ -110,8 +110,28 @@ function play(url: string) {
 
 type Build = (ac: BaseAudioContext, out: GainNode, t0: number) => void;
 
+// Voice limiting. A busy late round asks for 60+ sounds a second (every hit,
+// kill and coin); playing them all floods the audio pipeline and stalls the
+// page. The same sound plays at most every 55ms (a run of pings, not a
+// pile-up), and at most 8 sounds start in any 100ms window.
+const lastPlayed = new Map<string, number>();
+const recent: number[] = [];
+const SAME_GAP = 55;
+const WINDOW = 100;
+const MAX_IN_WINDOW = 8;
+
+function allowed(key: string, at: number): boolean {
+  if (at - (lastPlayed.get(key) ?? -Infinity) < SAME_GAP) return false;
+  while (recent.length && at - recent[0] > WINDOW) recent.shift();
+  if (recent.length >= MAX_IN_WINDOW) return false;
+  lastPlayed.set(key, at);
+  recent.push(at);
+  return true;
+}
+
 function fire(key: string, dur: number, delay: number, build: Build) {
   if (muted) return;
+  if (!allowed(key, performance.now() + delay * 1000)) return;
   if (!baked) {
     const ac = liveCtx();
     if (ac && liveOut) build(ac, liveOut, ac.currentTime + delay);

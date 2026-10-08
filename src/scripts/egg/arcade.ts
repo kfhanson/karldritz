@@ -217,16 +217,25 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   // crisp by CSS, with the plain value kept for screen readers.
   const coin = HUD_COIN();
   const shown = new Map<string, string>();
+  // One canvas per value, redrawn in place: late rounds change the score and
+  // chips many times a second.
+  const arts = new Map<string, { art: HTMLCanvasElement; sr: HTMLSpanElement }>();
   const pixel = (sel: string, text: string, label: string, icon?: HTMLCanvasElement, key = text, color?: string) => {
     if (shown.get(sel) === key) return;
     shown.set(sel, key);
-    const el = $(sel);
-    const art = pixelLine(text, icon, color);
-    art.className = 'ea-px';
-    art.setAttribute('aria-hidden', 'true');
-    art.style.setProperty('--w', String(art.width));
-    art.style.setProperty('--h', String(art.height));
-    el.replaceChildren(art, Object.assign(document.createElement('span'), { className: 'ea-sr', textContent: label }));
+    let slot = arts.get(sel);
+    if (!slot) {
+      const art = document.createElement('canvas');
+      art.className = 'ea-px';
+      art.setAttribute('aria-hidden', 'true');
+      const sr = Object.assign(document.createElement('span'), { className: 'ea-sr' });
+      $(sel).replaceChildren(art, sr);
+      arts.set(sel, (slot = { art, sr }));
+    }
+    pixelLine(text, icon, color, slot.art);
+    slot.art.style.setProperty('--w', String(slot.art.width));
+    slot.art.style.setProperty('--h', String(slot.art.height));
+    slot.sr.textContent = label;
   };
   function renderHud(h: Hud) {
     const idle = game.mode === 'attract';

@@ -139,18 +139,6 @@ interface Bullet {
   hit: Set<Enemy>; // already struck, so a piercing shot doesn't hit twice
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  z: number;
-  vx: number;
-  vy: number;
-  vz: number;
-  life: number;
-  max: number;
-  color: string;
-}
-
 interface Pickup extends Body {
   kind: 'heart' | 'bolt' | 'chip';
   value: number; // chips
@@ -244,6 +232,89 @@ const blocked = (x: number, y: number, r: number) =>
   x < ARENA.x0 + r || x > ARENA.x1 - r || y < ARENA.y0 || y > ARENA.y1 ||
   PROPS.some((p) => x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r);
 
+// Sparks, dust and debris, in a fixed pool of flat arrays. Late rounds throw
+// off hundreds a second; as objects they kept the garbage collector busy
+// enough to stall Safari. Here nothing is allocated after start-up.
+class Sparks {
+  static readonly MAX = 600;
+  n = 0;
+  private x = new Float32Array(Sparks.MAX);
+  private y = new Float32Array(Sparks.MAX);
+  private z = new Float32Array(Sparks.MAX);
+  private vx = new Float32Array(Sparks.MAX);
+  private vy = new Float32Array(Sparks.MAX);
+  private vz = new Float32Array(Sparks.MAX);
+  private life = new Float32Array(Sparks.MAX);
+  private max = new Float32Array(Sparks.MAX);
+  private col = new Uint8Array(Sparks.MAX);
+  private colors: string[] = [];
+
+  add(x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, color: string) {
+    if (this.n >= Sparks.MAX) return; // full: a few missing sparks go unnoticed
+    let c = this.colors.indexOf(color);
+    if (c < 0) c = this.colors.push(color) - 1;
+    const i = this.n++;
+    this.x[i] = x;
+    this.y[i] = y;
+    this.z[i] = z;
+    this.vx[i] = vx;
+    this.vy[i] = vy;
+    this.vz[i] = vz;
+    this.life[i] = life;
+    this.max[i] = life;
+    this.col[i] = c;
+  }
+
+  clear() {
+    this.n = 0;
+  }
+
+  update(dt: number) {
+    for (let i = 0; i < this.n; i++) {
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) {
+        // Swap the last one into this slot.
+        const j = --this.n;
+        this.x[i] = this.x[j];
+        this.y[i] = this.y[j];
+        this.z[i] = this.z[j];
+        this.vx[i] = this.vx[j];
+        this.vy[i] = this.vy[j];
+        this.vz[i] = this.vz[j];
+        this.life[i] = this.life[j];
+        this.max[i] = this.max[j];
+        this.col[i] = this.col[j];
+        i--;
+        continue;
+      }
+      this.x[i] += this.vx[i] * dt;
+      this.y[i] += this.vy[i] * dt;
+      this.vz[i] -= 380 * dt;
+      this.z[i] += this.vz[i] * dt;
+      if (this.z[i] < 0) {
+        // Sparks bounce and skid on the floor.
+        this.z[i] = 0;
+        this.vz[i] = -this.vz[i] * 0.35;
+        this.vx[i] *= 0.6;
+        this.vy[i] *= 0.6;
+      }
+    }
+  }
+
+  /** Fading ones flicker out on alternate frames: pixel-style, and no alpha changes. */
+  draw(c: CanvasRenderingContext2D, frame: number) {
+    let current = -1;
+    for (let i = 0; i < this.n; i++) {
+      if (this.life[i] < this.max[i] * 0.5 && (i + frame) & 1) continue;
+      if (this.col[i] !== current) {
+        current = this.col[i];
+        c.fillStyle = this.colors[current];
+      }
+      c.fillRect(Math.round(this.x[i]), Math.round(this.y[i] - this.z[i]), 1, 1);
+    }
+  }
+}
+
 export class Game {
   mode: 'attract' | 'play' | 'paused' | 'over' | 'offer' = 'attract';
 
@@ -265,7 +336,9 @@ export class Game {
   private player: Player | null = null;
   private enemies: Enemy[] = [];
   private bullets: Bullet[] = [];
-  private particles: Particle[] = [];
+  private sparks = new Sparks();
+  private drawList: { y: number; kind: number; ref: unknown }[] = [];
+  private frameNo = 0;
   private pickups: Pickup[] = [];
   private pops: { x: number; y: number; text: string; life: number }[] = [];
   private doors: Door[] = DOORS.map((d) => ({ ...d, charge: 0, queue: null, open: 0, hold: 0 }));
@@ -288,6 +361,9 @@ export class Game {
   private hitstop = 0;
   private deadT = 0;
   private lastHud = '';
+  private hudAt = -Infinity;
+  private hudHp = -1;
+  private hudRound = -1;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -313,7 +389,7 @@ export class Game {
     this.enemies = [];
     this.bullets = [];
     this.pickups = [];
-    this.particles = [];
+    this.sparks.clear();
     this.pops = [];
     this.resetDoors();
     this.score = 0;
@@ -732,7 +808,7 @@ export class Game {
           dmg: w.dmg + l.dmg, pierce: w.pierce + l.pierce, bounce: w.bounce, size: w.size, color: w.color, hit: new Set(),
         });
       }
-      this.particles.push({ x: bx, y: by, z: GUN_Z, vx: aim.x * 30, vy: aim.y * 30, vz: 0, life: 0.06, max: 0.06, color: PAL.y });
+      this.sparks.add(bx, by, GUN_Z, aim.x * 30, aim.y * 30, 0, 0.06, PAL.y);
       if (w.id === 'shotgun') burst(0.14, 600, 0.35, 'lowpass');
       else if (w.id === 'rail') tone(1400, 300, 0.12, 0.05, 'sawtooth');
       else if (w.id === 'revolver') (burst(0.08, 900, 0.25, 'lowpass'), tone(600, 300, 0.06, 0.04, 'square'));
@@ -1022,21 +1098,7 @@ export class Game {
   }
 
   private updateFx(dt: number) {
-    for (const q of this.particles) {
-      q.life -= dt;
-      q.x += q.vx * dt;
-      q.y += q.vy * dt;
-      q.vz -= 380 * dt;
-      q.z += q.vz * dt;
-      if (q.z < 0) {
-        // Sparks bounce and skid on the floor.
-        q.z = 0;
-        q.vz = -q.vz * 0.35;
-        q.vx *= 0.6;
-        q.vy *= 0.6;
-      }
-    }
-    this.particles = this.particles.filter((q) => q.life > 0);
+    this.sparks.update(dt);
     for (const pop of this.pops) {
       pop.life -= dt;
       pop.y -= 14 * dt;
@@ -1049,14 +1111,14 @@ export class Game {
       const a = Math.random() * Math.PI * 2;
       const s = rand(20, 100);
       const life = rand(0.3, 0.7);
-      this.particles.push({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: rand(40, 140), life, max: life, color });
+      this.sparks.add(x, y, z, Math.cos(a) * s, Math.sin(a) * s * 0.6, rand(40, 140), life, color);
     }
   }
 
   private dust(x: number, y: number, n: number) {
     for (let i = 0; i < n; i++) {
       const life = rand(0.2, 0.35);
-      this.particles.push({ x: x + rand(-2, 2), y: y + rand(-1, 1), z: 0, vx: rand(-15, 15), vy: rand(-8, 8), vz: rand(10, 30), life, max: life, color: PAL.w });
+      this.sparks.add(x + rand(-2, 2), y + rand(-1, 1), 0, rand(-15, 15), rand(-8, 8), rand(10, 30), life, PAL.w);
     }
   }
 
@@ -1080,9 +1142,15 @@ export class Game {
       mult: this.mult(),
       rapid: !!p && p.rapid > 0,
     };
-    const key = JSON.stringify(hud);
+    const key = `${hud.round}|${hud.score}|${hud.best}|${hud.hp}|${hud.maxHp}|${hud.chips}|${hud.weaponId}|${hud.mult}|${hud.rapid}`;
     if (key === this.lastHud) return;
+    // At most ten updates a second, except when health changes.
+    const now = performance.now();
+    if (now - this.hudAt < 100 && hud.hp === this.hudHp && hud.round === this.hudRound) return;
     this.lastHud = key;
+    this.hudAt = now;
+    this.hudHp = hud.hp;
+    this.hudRound = hud.round;
     this.hooks.hud(hud);
   }
 
@@ -1303,6 +1371,80 @@ export class Game {
     this.ctx.drawImage(img, Math.round(x), Math.round(y), s.w * scale, s.h * scale);
   }
 
+  private drawPickup(k: Pickup) {
+    const sp = this.sprites;
+    const s = k.kind === 'chip' ? sp.chip : k.kind === 'heart' ? sp.heart : sp.bolt;
+    this.draw(s, k.x - s.w / 2, k.y - k.z - s.h - Math.sin(this.time * 6), 1);
+  }
+
+  private drawEnemy(e: Enemy) {
+    const sp = this.sprites;
+    const flash = e.flash > 0 || (e.wind > 0 && Math.floor(e.t * 20) % 2 === 0);
+    const frame = Math.floor(e.t * (e.kind === 'flyer' ? 10 : 8)) % 2;
+    const s = e.kind === 'crawler' ? sp.crawler[frame] : e.kind === 'flyer' ? sp.flyer[frame] : sp.brute[frame];
+    const scale = e.kind === 'boss' ? 2 : 1;
+    this.draw(s, e.x - (s.w * scale) / 2, e.y - e.z - s.h * scale + 1, e.dir, flash, scale);
+  }
+
+  private drawPlayer(p: Player) {
+    const c = this.ctx;
+    // Body: one of eight views, from where it's looking.
+    const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
+    const [view, mirror] = PERSON_VIEW[oct];
+    const f = this.person[view];
+    const moving = Math.hypot(p.vx, p.vy) > 10;
+    const step = Math.floor(p.anim / 6) % 2;
+    const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
+    // A bob: on every step, or a slow breath when standing.
+    const bob = moving ? (step ? -1 : 0) : Math.floor(this.time * 1.6) % 2 ? -1 : 0;
+    const bx = Math.round(p.x - s.w / 2);
+    const by = Math.round(p.y - s.h + 1 + bob);
+
+    // Arms and gun. The gun hand reaches from the shoulder on the aiming
+    // side; the other hand takes the fore-grip of a long gun, or hangs.
+    const aim = this.aimDir(p);
+    const gun = this.guns[this.loadout.weapon];
+    const sy = p.y - PERSON_SHOULDER + bob;
+    const side = Math.abs(aim.x) > 0.2 ? Math.sign(aim.x) : oct === 6 ? 1 : -1;
+    const gunShoulder = { x: p.x + side * 4, y: sy };
+    const offShoulder = { x: p.x - side * 4, y: sy };
+    const reach = REACH - (p.kick / 0.08) * 1.5;
+    const hand = { x: gunShoulder.x + aim.x * reach, y: gunShoulder.y + aim.y * reach };
+    const k = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * GUN_ANGLES) + GUN_ANGLES) % GUN_ANGLES;
+    const swing = moving ? (step ? 1 : -1) : 0;
+    const offHand = gun.fore
+      ? { x: hand.x + aim.x * gun.fore, y: hand.y + aim.y * gun.fore }
+      : { x: offShoulder.x - side * 0.5, y: offShoulder.y + 6 + swing };
+    const arms = () => {
+      this.arm(gunShoulder, hand, false);
+      this.arm(offShoulder, offHand, !gun.fore);
+      c.drawImage(gun.frames[k], Math.round(hand.x - gun.half), Math.round(hand.y - gun.half));
+      if (gun.fore) this.fist(offHand);
+      // Muzzle flash on the frame of a shot.
+      if (p.kick > 0.05) {
+        const mx = Math.round(hand.x + aim.x * (gun.muzzle + 1.5));
+        const my = Math.round(hand.y + aim.y * (gun.muzzle + 1.5));
+        c.fillStyle = PAL.y;
+        c.fillRect(mx - 1, my, 3, 1);
+        c.fillRect(mx, my - 1, 1, 3);
+        c.fillStyle = '#FFFFFF';
+        c.fillRect(mx, my, 1, 1);
+      }
+    };
+
+    const behind = aim.y < -0.35; // aiming up the room: the body is in front
+    if (behind) arms();
+    this.draw(s, bx, by, mirror ? -1 : 1);
+    if (!behind) arms();
+
+    // Rapid fire: a spark over the head.
+    if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
+      c.fillStyle = PAL.y;
+      c.fillRect(Math.round(p.x) - 1, by - 3, 3, 1);
+      c.fillRect(Math.round(p.x), by - 4, 1, 3);
+    }
+  }
+
   private render() {
     const c = this.ctx;
     const sp = this.sprites;
@@ -1329,90 +1471,40 @@ export class Game {
       c.fillRect(Math.round(b.x), Math.round(b.y), 1, 1);
     }
 
-    // Then everything with height, back to front.
-    const items: { y: number; draw: () => void }[] = [];
-    for (const pr of PROPS) items.push({ y: pr.y + pr.h, draw: () => this.drawProp(pr) });
-    for (const k of this.pickups) {
-      if (k.life < 2 && Math.floor(k.life * 10) % 2) continue;
-      const s = k.kind === 'chip' ? sp.chip : k.kind === 'heart' ? sp.heart : sp.bolt;
-      items.push({ y: k.y, draw: () => this.draw(s, k.x - s.w / 2, k.y - k.z - s.h - Math.sin(this.time * 6), 1) });
+    // Then everything with height, back to front. One reused list of plain
+    // entries rather than a fresh array of closures every frame: less garbage
+    // for the collector in long, busy rounds.
+    const list = this.drawList;
+    let n = 0;
+    const put = (y: number, kind: number, ref: unknown) => {
+      const it = list[n] ?? (list[n] = { y: 0, kind: 0, ref: null });
+      it.y = y;
+      it.kind = kind;
+      it.ref = ref;
+      n++;
+    };
+    for (const pr of PROPS) put(pr.y + pr.h, 0, pr);
+    for (const k of this.pickups) if (!(k.life < 2 && Math.floor(k.life * 10) % 2)) put(k.y, 1, k);
+    for (const e of this.enemies) put(e.y, 2, e);
+    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) put(p.y, 3, p);
+    list.length = Math.max(list.length, n);
+    // Insertion sort: the order barely changes between frames, so it's near-linear.
+    for (let i = 1; i < n; i++) {
+      const it = list[i];
+      let j = i - 1;
+      while (j >= 0 && list[j].y > it.y) {
+        list[j + 1] = list[j];
+        j--;
+      }
+      list[j + 1] = it;
     }
-    for (const e of this.enemies) {
-      items.push({
-        y: e.y,
-        draw: () => {
-          const flash = e.flash > 0 || (e.wind > 0 && Math.floor(e.t * 20) % 2 === 0);
-          const frame = Math.floor(e.t * (e.kind === 'flyer' ? 10 : 8)) % 2;
-          const s = e.kind === 'crawler' ? sp.crawler[frame] : e.kind === 'flyer' ? sp.flyer[frame] : sp.brute[frame];
-          const scale = e.kind === 'boss' ? 2 : 1;
-          this.draw(s, e.x - (s.w * scale) / 2, e.y - e.z - s.h * scale + 1, e.dir, flash, scale);
-        },
-      });
+    for (let i = 0; i < n; i++) {
+      const it = list[i];
+      if (it.kind === 0) this.drawProp(it.ref as Prop);
+      else if (it.kind === 1) this.drawPickup(it.ref as Pickup);
+      else if (it.kind === 2) this.drawEnemy(it.ref as Enemy);
+      else this.drawPlayer(it.ref as Player);
     }
-    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) {
-      items.push({
-        y: p.y,
-        draw: () => {
-          // Body: one of eight views, from where it's looking.
-          const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
-          const [view, mirror] = PERSON_VIEW[oct];
-          const f = this.person[view];
-          const moving = Math.hypot(p.vx, p.vy) > 10;
-          const step = Math.floor(p.anim / 6) % 2;
-          const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
-          // A bob: on every step, or a slow breath when standing.
-          const bob = moving ? (step ? -1 : 0) : Math.floor(this.time * 1.6) % 2 ? -1 : 0;
-          const bx = Math.round(p.x - s.w / 2);
-          const by = Math.round(p.y - s.h + 1 + bob);
-
-          // Arms and gun. The gun hand reaches from the shoulder on the aiming
-          // side; the other hand takes the fore-grip of a long gun, or hangs.
-          const aim = this.aimDir(p);
-          const gun = this.guns[this.loadout.weapon];
-          const sy = p.y - PERSON_SHOULDER + bob;
-          const side = Math.abs(aim.x) > 0.2 ? Math.sign(aim.x) : oct === 6 ? 1 : -1;
-          const gunShoulder = { x: p.x + side * 4, y: sy };
-          const offShoulder = { x: p.x - side * 4, y: sy };
-          const reach = REACH - (p.kick / 0.08) * 1.5;
-          const hand = { x: gunShoulder.x + aim.x * reach, y: gunShoulder.y + aim.y * reach };
-          const k = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * GUN_ANGLES) + GUN_ANGLES) % GUN_ANGLES;
-          const swing = moving ? (step ? 1 : -1) : 0;
-          const offHand = gun.fore
-            ? { x: hand.x + aim.x * gun.fore, y: hand.y + aim.y * gun.fore }
-            : { x: offShoulder.x - side * 0.5, y: offShoulder.y + 6 + swing };
-          const arms = () => {
-            this.arm(gunShoulder, hand, false);
-            this.arm(offShoulder, offHand, !gun.fore);
-            c.drawImage(gun.frames[k], Math.round(hand.x - gun.half), Math.round(hand.y - gun.half));
-            if (gun.fore) this.fist(offHand);
-            // Muzzle flash on the frame of a shot.
-            if (p.kick > 0.05) {
-              const mx = Math.round(hand.x + aim.x * (gun.muzzle + 1.5));
-              const my = Math.round(hand.y + aim.y * (gun.muzzle + 1.5));
-              c.fillStyle = PAL.y;
-              c.fillRect(mx - 1, my, 3, 1);
-              c.fillRect(mx, my - 1, 1, 3);
-              c.fillStyle = '#FFFFFF';
-              c.fillRect(mx, my, 1, 1);
-            }
-          };
-
-          const behind = aim.y < -0.35; // aiming up the room: the body is in front
-          if (behind) arms();
-          this.draw(s, bx, by, mirror ? -1 : 1);
-          if (!behind) arms();
-
-          // Rapid fire: a spark over the head.
-          if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
-            c.fillStyle = PAL.y;
-            c.fillRect(Math.round(p.x) - 1, by - 3, 3, 1);
-            c.fillRect(Math.round(p.x), by - 4, 1, 3);
-          }
-        },
-      });
-    }
-    items.sort((a, b) => a.y - b.y);
-    for (const it of items) it.draw();
 
     // Shots and sparks on top.
     for (const b of this.bullets) {
@@ -1427,12 +1519,7 @@ export class Game {
         c.fillRect(Math.round(b.x - (b.vx / sp2) * (t + h)), Math.round(sy - (b.vy / sp2) * (t + h)), 1, 1);
       }
     }
-    for (const q of this.particles) {
-      c.globalAlpha = Math.min(1, (q.life / q.max) * 1.5);
-      c.fillStyle = q.color;
-      c.fillRect(Math.round(q.x), Math.round(q.y - q.z), 1, 1);
-    }
-    c.globalAlpha = 1;
+    this.sparks.draw(c, this.frameNo++);
     for (const pop of this.pops) drawText(c, pop.text, pop.x, pop.y, pop.life > 0.2 || Math.floor(pop.life * 20) % 2 ? PAL.k : PAL.r);
     c.restore();
   }
