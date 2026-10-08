@@ -142,6 +142,21 @@ const TEMPLATE = `
   </div>
 `;
 
+const TYPE_CSS = 'https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=Silkscreen&display=swap';
+
+/** Fetch the pixel faces ahead of time: the menu's glass labels are drawn on
+ * the frame the page breaks, too soon to wait for them. */
+export function preloadType() {
+  if (document.querySelector('link[data-egg-type]')) return;
+  const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: TYPE_CSS });
+  link.dataset.eggType = '';
+  document.documentElement.appendChild(link); // outside <head>, which page swaps replace
+  link.onload = () => {
+    document.fonts.load('600 20px "Pixelify Sans"').catch(() => {});
+    document.fonts.load('9px Silkscreen').catch(() => {});
+  };
+}
+
 export interface Arcade {
   /** Resolves when the player asks to leave. */
   exit: Promise<void>;
@@ -156,7 +171,9 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-label', 'Bug Hunt, a hidden game');
+  preloadType();
   root.innerHTML = TEMPLATE;
+  root.dataset.type = 'pixel';
   if (fade) root.classList.add('is-fading');
   document.documentElement.appendChild(root);
 

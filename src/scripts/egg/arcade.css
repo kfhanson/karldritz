@@ -740,3 +740,51 @@
     color: var(--a-muted);
   }
 }
+
+/* Pixel type: the game's text in pixel faces to match the art. Pixelify Sans
+   for titles and copy, Silkscreen for small labels and key hints. */
+.egg-arcade[data-type='pixel'] {
+  --a-display: 'Pixelify Sans', 'Silkscreen', ui-monospace, monospace;
+  --a-sans: 'Pixelify Sans', ui-monospace, monospace;
+  --a-mono: 'Silkscreen', 'Pixelify Sans', ui-monospace, monospace;
+  -webkit-font-smoothing: none;
+  font-variant-ligatures: none; /* its fi/fl ligatures look broken at pixel sizes */
+}
+.egg-arcade[data-type='pixel'] .ea-banner p,
+.egg-arcade[data-type='pixel'] .ea-screen h3 {
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.egg-arcade[data-type='pixel'] .ea-card strong {
+  font-weight: 600;
+}
+.egg-arcade[data-type='pixel'] .ea-eyebrow,
+.egg-arcade[data-type='pixel'] .ea-hud dt,
+.egg-arcade[data-type='pixel'] .ea-kicker {
+  letter-spacing: 0.04em;
+}
+/* Pixel faces run small and thin: body copy a step heavier and larger,
+   labels a size up, so the small print stays easy to read. */
+.egg-arcade[data-type='pixel'] .ea-copy,
+.egg-arcade[data-type='pixel'] .ea-keys li,
+.egg-arcade[data-type='pixel'] .ea-card span,
+.egg-arcade[data-type='pixel'] .ea-help,
+.egg-arcade[data-type='pixel'] .ea-chip,
+.egg-arcade[data-type='pixel'] .ea-menu button {
+  font-weight: 500;
+  font-size: 1.06em;
+}
+.egg-arcade[data-type='pixel'] .ea-card span {
+  color: #55554f;
+}
+.egg-arcade[data-type='pixel'] .ea-eyebrow,
+.egg-arcade[data-type='pixel'] .ea-banner span,
+.egg-arcade[data-type='pixel'] .ea-kicker,
+.egg-arcade[data-type='pixel'] .ea-card em,
+.egg-arcade[data-type='pixel'] .ea-keys li > span:first-child {
+  font-size: 12px;
+}
+.egg-arcade[data-type='pixel'] .ea-hud dt {
+  font-size: 11px;
+}

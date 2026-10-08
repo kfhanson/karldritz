@@ -411,6 +411,12 @@ export function createShardMenu(
   const maxShardW = Math.min(frame0.width * 0.62, 470);
   const maxShardH = frame0.height * 0.3;
   const meas = document.createElement('canvas').getContext('2d')!;
+  // The labels use the arcade's type, whatever it's set to.
+  const css = getComputedStyle(host);
+  const displayFont = css.getPropertyValue('--a-display').trim() || 'Fraunces, Georgia, serif';
+  const monoFont = css.getPropertyValue('--a-mono').trim() || '"JetBrains Mono", monospace';
+  const pixelType = host.dataset.type === 'pixel';
+  const labelWeight = pixelType ? 600 : 400;
 
   const shards: Shard[] = items.map((item, i) => {
     // Outline: a real cut from the page, or a made-up one.
@@ -431,9 +437,9 @@ export function createShardMenu(
     // find the biggest box of that shape inside the shard, and scale the shard
     // until that box holds the label. Then the words can't run off the glass.
     const hint = touch ? undefined : item.hint;
-    meas.font = `400 ${fsPx}px Fraunces, Georgia, serif`;
+    meas.font = `${labelWeight} ${fsPx}px ${displayFont}`;
     const textW = meas.measureText(item.label).width;
-    meas.font = `500 9px "JetBrains Mono", monospace`;
+    meas.font = `500 9px ${monoFont}`;
     const hintW = hint ? meas.measureText(hint.toUpperCase()).width + 8 : 0;
     const needW = textW + hintW + fsPx * 1.5;
     const needH = fsPx * 2;
@@ -505,21 +511,22 @@ export function createShardMenu(
     // The lettering, drawn at the size it will hang at.
     const k = size * Math.min(window.devicePixelRatio || 1, 2);
     const tc = document.createElement('canvas');
+    tc.style.fontVariantLigatures = 'none';
     tc.width = Math.max(2, Math.ceil(lw * k));
     tc.height = Math.max(2, Math.ceil(lh * k));
     const g = tc.getContext('2d')!;
     g.scale(k, k);
     // The label sits in the fitted box: its centre, in canvas space (y down).
     const fs = (fsPx * shrink) / size;
-    const hintFont = `500 ${(9 * shrink) / size}px "JetBrains Mono", monospace`;
-    g.font = `400 ${fs}px Fraunces, Georgia, serif`;
+    const hintFont = `500 ${(9 * shrink) / size}px ${monoFont}`;
+    g.font = `${labelWeight} ${fs}px ${displayFont}`;
     const labelW = g.measureText(item.label).width;
     g.font = hintFont;
     const gapW = hint ? (8 * shrink) / size : 0;
     const hintWc = hint ? g.measureText(hint.toUpperCase()).width : 0;
     const x0 = box.cx - bx0 - (labelW + gapW + hintWc) / 2;
     const cy = by1 - box.cy + fs * 0.05;
-    g.font = `400 ${fs}px Fraunces, Georgia, serif`;
+    g.font = `${labelWeight} ${fs}px ${displayFont}`;
     g.textBaseline = 'middle';
     g.textAlign = 'left';
     // A faint light halo keeps the letters clear over dark things behind.

@@ -562,6 +562,7 @@ function warmGL() {
 /** Second click: nothing to see yet, but get the expensive bits going. */
 export function warm(settled: number) {
   arcadeModule ??= import('./arcade');
+  arcadeModule.then((m) => m.preloadType());
   import('./snapshot');
   import('./shards3d');
   // The slow work starts as soon as the page is still — ideally before the
