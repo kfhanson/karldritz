@@ -39,6 +39,31 @@ function paint(rows: string[], color?: string, mirror = false): HTMLCanvasElemen
   return c;
 }
 
+/** A pixel icon with a 1px ink outline round its silhouette. */
+function outlined(rows: string[]): HTMLCanvasElement {
+  const h = rows.length;
+  const w = rows[0].length;
+  const c = document.createElement('canvas');
+  c.width = w + 2;
+  c.height = h + 2;
+  const g = c.getContext('2d')!;
+  const on = (x: number, y: number) => y >= 0 && y < h && x >= 0 && x < w && rows[y][x] !== '.';
+  g.fillStyle = PAL.k;
+  for (let y = -1; y <= h; y++) {
+    for (let x = -1; x <= w; x++) {
+      if (!on(x, y) && (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1))) g.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!on(x, y)) continue;
+      g.fillStyle = PAL[rows[y][x]];
+      g.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
+  return c;
+}
+
 function sprite(rows: string[]): Sprite {
   return {
     w: rows[0].length,
@@ -106,11 +131,11 @@ export function buildSprites() {
     heart: sprite(HEART),
     chip: sprite(['.yy.', 'ywyy', 'yyyy', '.yy.']),
     // Signs over the lifts after a boss.
+    // Signs over the lifts after a boss, outlined so they read on the wall.
     signs: {
-      shop: sprite(['.yyy.', 'yykyy', 'ykyyy', 'yykyy', 'yyyky', 'yykyy', '.yyy.']),
-      perk: sprite(['...y...', '..yyy..', 'yyyyyyy', '.yyyyy.', '..yyy..', '.yy.yy.', 'y.....y']),
-      weapon: sprite(['..k....', '.kck...', 'kcckkkk', 'kcccccc', 'kcwkkkk', '.kkk...']),
-      repair: sprite(['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...']),
+      shop: outlined(['..kkk..', '.k...k.', 'ggggggg', 'ggggggg', 'yyyyyyy', 'ggggggg', 'ggggggg']),
+      perk: outlined(['...y...', '...y...', 'yyyyyyy', '.yyyyy.', '..yyy..', '.yy.yy.', '.y...y.']),
+      repair: outlined(['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...']),
     },
     bolt: sprite(BOLT),
   };

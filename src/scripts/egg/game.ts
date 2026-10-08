@@ -1308,12 +1308,17 @@ export class Game {
         const k = this.doors.filter((x) => x.side === 'back').indexOf(d);
         const kind = (this.phase === 'lifts' || this.phase === 'riding' || this.mode === 'offer') ? this.lifts[k] : undefined;
         if (kind) {
-          // Where this lift goes, bobbing over the door.
-          const sign = this.sprites.signs[kind === 'perk' ? 'perk' : kind];
-          const bob = Math.floor(this.time * 3 + k) % 2;
-          c.fillStyle = 'rgba(246,245,241,0.9)';
-          c.fillRect(d.x - 6, WALL_TOP + 1, 12, 9);
-          c.drawImage(sign.right, Math.round(d.x - sign.w / 2), WALL_TOP + 2 + bob);
+          // Where this lift goes: a sign on a plate over the door.
+          const icon = kind === 'weapon' ? this.guns.pistol.icon : this.sprites.signs[kind];
+          const pw = Math.max(13, icon.width + 4);
+          const ph = icon.height + 4;
+          const px = Math.round(d.x - pw / 2);
+          const py = WALL_TOP + 2;
+          c.fillStyle = PAL.k;
+          c.fillRect(px, py, pw, ph);
+          c.fillStyle = PAL.c;
+          c.fillRect(px + 1, py + 1, pw - 2, ph - 2);
+          c.drawImage(icon, Math.round(d.x - icon.width / 2), py + 2);
         } else {
           c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
           c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
