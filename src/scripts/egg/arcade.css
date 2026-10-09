@@ -228,13 +228,33 @@
 .ea-sizer {
   /* A touch under the full room, and capped: every screen pixel of the frame
      is composited each frame, so bigger isn't free. */
-  width: min(100%, calc((100dvh - 7rem) * 320 / 184 * 0.88), 1120px);
+  width: min(100%, calc((100dvh - 8.3rem) * 320 / 184 * 0.88), 1120px);
   height: 0;
   margin: 0 auto;
 }
+/* A slim row over the frame, the frame's own width: the frame rate, right. */
+.ea-meta {
+  width: var(--fit-w, min(100%, calc((100dvh - 8.3rem) * 320 / 184 * 0.88), 1120px));
+  margin: 0 auto 0.35rem;
+  display: flex;
+  justify-content: flex-end;
+}
+.ea-fps {
+  font-family: var(--a-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--a-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 6ch;
+  text-align: right;
+}
+.ea-fps.is-low {
+  color: var(--a-rust);
+}
+
 .ea-frame {
   position: relative;
-  width: var(--fit-w, min(100%, calc((100dvh - 7rem) * 320 / 184 * 0.88), 1120px));
+  width: var(--fit-w, min(100%, calc((100dvh - 8.3rem) * 320 / 184 * 0.88), 1120px));
   min-width: min(100%, 320px);
   aspect-ratio: 320 / 184;
   margin: 0 auto;
@@ -697,7 +717,7 @@
     justify-content: flex-start;
   }
   .ea-sizer {
-    width: min(100%, calc((100dvh - 4.6rem) * 320 / 184));
+    width: min(100%, calc((100dvh - 5.8rem) * 320 / 184));
   }
   .ea-chip[data-mute] {
     display: none;

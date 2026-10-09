@@ -57,6 +57,7 @@ const TEMPLATE = `
 
     <div class="ea-stage">
       <div class="ea-sizer" aria-hidden="true"></div>
+      <div class="ea-meta" aria-hidden="true"><span class="ea-fps" data-fps>-- FPS</span></div>
       <div class="ea-frame" tabindex="-1">
         <canvas class="ea-canvas" aria-label="Bug Hunt game"></canvas>
         <div class="ea-banner" data-banner aria-live="polite"><p data-banner-title></p><span data-banner-sub></span></div>
@@ -553,7 +554,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     const snapped = (k * VIEW_W) / dpr;
     // Snapping can cost up to one step of size; past 8% the room matters more
     // than perfectly even pixels (on sharp screens the unevenness is hard to see).
-    frame.style.setProperty('--fit-w', `${snapped >= avail * 0.92 ? snapped : avail}px`);
+    // On the stage, so the frame and the row above it share the width.
+    $('.ea-stage').style.setProperty('--fit-w', `${snapped >= avail * 0.92 ? snapped : avail}px`);
   });
   ro.observe(sizer);
 
@@ -562,12 +564,31 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   openMenu();
   requestAnimationFrame(() => root.classList.add('is-in'));
 
+  // Frame rate: frames counted over half a second, shown twice a second.
+  const fpsEl = $('[data-fps]');
+  let fpsRaf = 0;
+  let fpsFrames = 0;
+  let fpsFrom = performance.now();
+  const fpsTick = (now: number) => {
+    fpsFrames++;
+    if (now - fpsFrom >= 500) {
+      const fps = Math.round((fpsFrames * 1000) / (now - fpsFrom));
+      fpsEl.textContent = `${fps} FPS`;
+      fpsEl.classList.toggle('is-low', fps < 50);
+      fpsFrames = 0;
+      fpsFrom = now;
+    }
+    fpsRaf = requestAnimationFrame(fpsTick);
+  };
+  fpsRaf = requestAnimationFrame(fpsTick);
+
   return {
     exit,
     reassemble: () => shards?.home() ?? Promise.resolve(),
     destroy: (fadeOut) =>
       new Promise<void>((resolve) => {
         const done = () => {
+          cancelAnimationFrame(fpsRaf);
           shards?.destroy();
           game.destroy();
           ro.disconnect();
