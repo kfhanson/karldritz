@@ -208,8 +208,9 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   let bannerTimer: ReturnType<typeof setTimeout> | undefined;
   const game = new Game(canvas, {
     hud: (h: Hud) => renderHud(h),
-    banner: (title, sub) => {
+    banner: (title, sub, dark) => {
       $('[data-banner-title]').textContent = title;
+      banner.classList.toggle('is-dark', !!dark);
       $('[data-banner-sub]').textContent = sub ?? '';
       banner.classList.remove('is-on');
       void banner.offsetWidth;

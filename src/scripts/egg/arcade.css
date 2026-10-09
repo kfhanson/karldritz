@@ -405,6 +405,15 @@
   color: var(--a-rust);
   text-shadow: 0 0 2px var(--a-canvas);
 }
+/* Over B1's dark concrete: light ink */
+.ea-banner.is-dark p {
+  color: var(--a-canvas);
+  text-shadow: 0 0 3px var(--a-ink), 0 0 1px var(--a-ink);
+}
+.ea-banner.is-dark span {
+  color: #e2b45a;
+  text-shadow: 0 0 2px var(--a-ink);
+}
 .ea-banner.is-on {
   animation: ea-banner 1.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

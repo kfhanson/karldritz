@@ -120,7 +120,36 @@ const BRUTE_LEGS = [
   ['...kk....kk...', '..kkk....kkk..'],
 ];
 
-const HEART = ['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
+// The Root Bug, round 25's boss: a crowned beetle with circuitry in its
+// shell. Drawn as a left half and mirrored, so it's always symmetrical.
+const KING_HALF = [
+  '.......y.y',
+  '.......yyy',
+  '.......yry',
+  '..k....kkk',
+  '...k..kkkk',
+  '....kkkkkk',
+  '....krrkkk',
+  '....kcrkkk',
+  '...kkkkkkk',
+  '..kkkkkkkk',
+  '.kkllkkkkl',
+  'kkklkkkllk',
+  'kkklkkklkk',
+  'kkklllklkk',
+  'kkkkkklkkk',
+  '.kkkkkkkkk',
+  '..kmkmkmkm',
+];
+const KING_LEGS = [
+  ['..k..k...k', '.k..k...k.'],
+  ['...k..k..k', '..k..k..k.'],
+];
+const mirrorRows = (half: string[]) => half.map((r) => r + [...r].reverse().join(''));
+// Enraged: the circuits run hot and the eyes go brass.
+const enrage = (rows: string[]) => rows.map((r) => r.replace(/l/g, 'r').replace(/c/g, 'y'));
+
+const HEART = ['.rr.rr.','rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 const BOLT = ['...yy', '..yy.', '.yyyy', '..yy.', '.yy..', 'yy...'];
 
 export function buildSprites() {
@@ -128,9 +157,11 @@ export function buildSprites() {
     crawler: [sprite([...CRAWLER, CRAWLER_LEGS[0]]), sprite([...CRAWLER, CRAWLER_LEGS[1]])],
     flyer: [sprite(FLYER_UP), sprite(FLYER_DOWN)],
     brute: BRUTE_LEGS.map((legs) => sprite([...BRUTE, ...legs])),
+    king: KING_LEGS.map((legs) => sprite(mirrorRows([...KING_HALF, ...legs]))),
+    kingRage: KING_LEGS.map((legs) => sprite(enrage(mirrorRows([...KING_HALF, ...legs])))),
+    crown: outlined(['y.y.y', 'yyyyy', 'yryry']),
     heart: sprite(HEART),
     chip: sprite(['.yy.', 'ywyy', 'yyyy', '.yy.']),
-    // Signs over the lifts after a boss.
     // Signs over the lifts after a boss, outlined so they read on the wall.
     signs: {
       shop: outlined(['..kkk..', '.k...k.', 'ggggggg', 'ggggggg', 'yyyyyyy', 'ggggggg', 'ggggggg']),
