@@ -242,7 +242,7 @@ interface Bullet {
   bounce: number; // walls it can still bounce off
   size: number;
   color: string;
-  hit: Set<Enemy>; // already struck, so a piercing shot doesn't hit twice
+  hit: Enemy[] | null; // already struck, so a piercing shot doesn't hit twice (made on its first hit)
 }
 
 interface Pickup extends Body {
@@ -300,6 +300,10 @@ const STATS: Record<Kind, { r: number; score: number }> = {
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+// Not Math.hypot: V8 doesn't inline it, so every call boxes its arguments and
+// result as heap numbers. In the per-pair loops that was most of the game's
+// garbage. A plain square root compiles to one instruction.
+const len = (x: number, y: number) => Math.sqrt(x * x + y * y);
 
 function loadBest(): number {
   try {
@@ -309,36 +313,78 @@ function loadBest(): number {
   }
 }
 
-/** Push a circle out of the room's walls and furniture. */
+/**
+ * Push a circle out of the room's walls and furniture. Works on locals and
+ * writes the body once: repeated stores of fractions into a body's fields
+ * made garbage on every call.
+ */
 function collide(b: Body, solid = true, props = PROPS) {
-  b.x = clamp(b.x, ARENA.x0 + b.r, ARENA.x1 - b.r);
-  b.y = clamp(b.y, ARENA.y0 + b.r * 0.5, ARENA.y1);
-  if (!solid) return;
-  for (const p of props) {
-    const cx = clamp(b.x, p.x, p.x + p.w);
-    const cy = clamp(b.y, p.y, p.y + p.h);
-    const dx = b.x - cx;
-    const dy = b.y - cy;
-    const d = Math.hypot(dx, dy);
-    if (d >= b.r) continue;
-    if (d > 0.001) {
-      b.x = cx + (dx / d) * b.r;
-      b.y = cy + (dy / d) * b.r;
-    } else {
-      // Centre inside the box: out the nearest side.
-      const out = [b.x - p.x, p.x + p.w - b.x, b.y - p.y, p.y + p.h - b.y];
-      const k = out.indexOf(Math.min(...out));
-      if (k === 0) b.x = p.x - b.r;
-      else if (k === 1) b.x = p.x + p.w + b.r;
-      else if (k === 2) b.y = p.y - b.r;
-      else b.y = p.y + p.h + b.r;
+  const r = b.r;
+  let x = clamp(b.x, ARENA.x0 + r, ARENA.x1 - r);
+  let y = clamp(b.y, ARENA.y0 + r * 0.5, ARENA.y1);
+  if (solid) {
+    for (let i = 0; i < props.length; i++) {
+      const p = props[i];
+      const dx = x - clamp(x, p.x, p.x + p.w);
+      const dy = y - clamp(y, p.y, p.y + p.h);
+      const d2 = dx * dx + dy * dy;
+      if (d2 >= r * r) continue;
+      if (d2 > 1e-6) {
+        // Out along the line from the nearest point of the box.
+        const d = Math.sqrt(d2);
+        x += (dx / d) * (r - d);
+        y += (dy / d) * (r - d);
+      } else {
+        // Centre inside the box: out the nearest side.
+        const left = x - p.x;
+        const right = p.x + p.w - x;
+        const top = y - p.y;
+        const bottom = p.y + p.h - y;
+        const m = Math.min(left, right, top, bottom);
+        if (m === left) x = p.x - r;
+        else if (m === right) x = p.x + p.w + r;
+        else if (m === top) y = p.y - r;
+        else y = p.y + p.h + r;
+      }
     }
   }
+  b.x = x;
+  b.y = y;
 }
 
-const blocked = (x: number, y: number, r: number) =>
-  x < ARENA.x0 + r || x > ARENA.x1 - r || y < ARENA.y0 || y > ARENA.y1 ||
-  PROPS.some((p) => x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r);
+/**
+ * Drop the finished from a list in place. Filtering into a fresh array, for
+ * six lists sixty times a second, was steady work for the garbage collector.
+ */
+function prune<T>(list: T[], keep: (x: T) => boolean) {
+  let n = 0;
+  for (let i = 0; i < list.length; i++) if (keep(list[i])) list[n++] = list[i];
+  list.length = n;
+}
+const lasts = (x: { life: number }) => x.life > 0;
+const alive = (e: { hp: number; life: number }) => e.hp > 0 && e.life > 0;
+const spreading = (w: { r: number; max: number }) => w.r < w.max;
+
+// The headings a bug tries, nearest first, to get round furniture.
+const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
+
+function blocked(x: number, y: number, r: number) {
+  if (x < ARENA.x0 + r || x > ARENA.x1 - r || y < ARENA.y0 || y > ARENA.y1) return true;
+  for (let i = 0; i < PROPS.length; i++) {
+    const p = PROPS[i];
+    if (x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r) return true;
+  }
+  return false;
+}
+
+/** Whether a shot (or a glob of acid) at (x, y) has run into furniture that stops it. */
+function stopsShot(x: number, y: number) {
+  for (let i = 0; i < PROPS.length; i++) {
+    const p = PROPS[i];
+    if (p.stopsShots && x > p.x && x < p.x + p.w && y > p.y && y < p.y + p.h + 2) return true;
+  }
+  return false;
+}
 
 // Sparks, dust and debris, in a fixed pool of flat arrays. Late rounds throw
 // off hundreds a second; as objects they kept the garbage collector busy
@@ -451,11 +497,18 @@ export class Game {
   private waves: Wave[] = [];
   private quake: Quake | null = null;
   private barLag = 1; // the boss bar's trailing chunk, as a fraction
+  // Scratch vectors for the bugs' steering, which runs for every bug every
+  // tick. Each is read straight after it's written, never kept.
+  private tgt = { x: 0, y: 0 };
+  private want = { x: 0, y: 0 };
   private drawList: { y: number; kind: number; ref: unknown }[] = [];
+  private drawn = 0; // entries in use this frame
+  private paintedAt = -Infinity;
   private frameNo = 0;
   private pickups: Pickup[] = [];
   private pops: { x: number; y: number; text: string; life: number }[] = [];
   private doors: Door[] = DOORS.map((d) => ({ ...d, charge: 0, queue: null, open: 0, hold: 0 }));
+  private back = this.doors.filter((d) => d.side === 'back'); // the lifts, left to right
 
   private round = 0;
   private phase: 'intro' | 'fight' | 'clear' | 'lifts' | 'riding' | 'arriving' = 'intro';
@@ -473,11 +526,10 @@ export class Game {
   private shakeT = 0;
   private shakeK = 0;
   private hitstop = 0;
+  private still = window.matchMedia('(prefers-reduced-motion: reduce)'); // live, so it follows the setting
   private deadT = 0;
-  private lastHud = '';
+  private lastHud: Hud | null = null;
   private hudAt = -Infinity;
-  private hudHp = -1;
-  private hudRound = -1;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -592,8 +644,8 @@ export class Game {
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    if (this.mode === 'paused') return;
-    if (this.mode === 'offer') return void this.render();
+    // Paused, or in the shop: the frame drawn as it stopped stays up.
+    if (this.mode === 'paused' || this.mode === 'offer') return;
     this.acc += dt;
     let steps = 0;
     while (this.acc >= STEP && steps++ < 5) {
@@ -601,6 +653,11 @@ export class Game {
       this.acc -= STEP;
     }
     if (steps > 5) this.acc = 0;
+    // Behind the menu and the game-over card the room only idles, so it's
+    // drawn at 30fps: half the painting, and less for the browser to
+    // composite, for motion nobody is watching closely.
+    if ((this.mode === 'attract' || this.mode === 'over') && now - this.paintedAt < 1000 / 30 - 4) return;
+    this.paintedAt = now;
     this.render();
   };
 
@@ -635,7 +692,7 @@ export class Game {
     this.dashPressed = false;
 
     if (this.comboT > 0 && (this.comboT -= dt) <= 0) this.combo = 0;
-    this.enemies = this.enemies.filter((e) => e.hp > 0 && e.life > 0);
+    prune(this.enemies, alive);
     this.updateBar(dt);
     this.pushHud();
   }
@@ -645,7 +702,9 @@ export class Game {
   }
 
   private king(): Enemy | undefined {
-    return this.quake?.king ?? this.enemies.find((e) => e.kind === 'king');
+    if (this.quake) return this.quake.king;
+    for (const e of this.enemies) if (e.kind === 'king') return e;
+    return undefined;
   }
 
   // The boss bar's white chunk drains after the damage, so hits read.
@@ -719,7 +778,7 @@ export class Game {
     } else if (this.phase === 'clear' && this.phaseT <= 0) this.startRound(this.round + 1);
     else if (this.phase === 'lifts') {
       // Walk into an open lift to take it.
-      const back = this.doors.filter((d) => d.side === 'back');
+      const back = this.back;
       back.forEach((d) => ((d.open = Math.min(1, d.open + dt * 3)), (d.hold = 1)));
       const k = back.findIndex((d) => Math.abs(p.x - d.x) < 8 && p.y <= ARENA.y0 + 3);
       if (k >= 0) {
@@ -733,7 +792,7 @@ export class Game {
       }
     } else if (this.phase === 'riding') {
       // In, doors shut, up it goes.
-      const back = this.doors.filter((d) => d.side === 'back');
+      const back = this.back;
       back.forEach((d, i) => (d.open = Math.max(0, d.open - dt * (i === this.ride ? 2.2 : 4))));
       if (this.phaseT <= 0) {
         const kind = this.lifts[this.ride];
@@ -742,7 +801,7 @@ export class Game {
       }
     } else if (this.phase === 'arriving') {
       // Back down: the doors open and out it steps.
-      const d = this.doors.filter((x) => x.side === 'back')[this.ride];
+      const d = this.back[this.ride];
       d.open = Math.min(1, d.open + dt * 2.5);
       if (this.phaseT <= 0) {
         d.hold = 0.3;
@@ -797,7 +856,7 @@ export class Game {
   finishOffer() {
     if (this.mode !== 'offer') return;
     const p = this.player!;
-    const d = this.doors.filter((x) => x.side === 'back')[this.ride];
+    const d = this.back[this.ride];
     p.x = d.x;
     p.y = ARENA.y0 + 8;
     p.inv = 1.2;
@@ -821,7 +880,9 @@ export class Game {
   }
 
   private queued() {
-    return this.doors.filter((d) => d.queue).length;
+    let n = 0;
+    for (const d of this.doors) if (d.queue) n++;
+    return n;
   }
 
   // Pick an idle door, preferring ones away from the player.
@@ -830,7 +891,7 @@ export class Game {
     const big = kind === 'boss' || kind === 'king';
     let free = this.doors.filter((d) => !d.queue && (!big || d.side === 'back'));
     if (p && free.length > 1) {
-      const far = free.filter((d) => Math.hypot(d.x - p.x, d.y - p.y) > 70);
+      const far = free.filter((d) => len(d.x - p.x, d.y - p.y) > 70);
       if (far.length) free = far;
     }
     if (!free.length) return false;
@@ -916,7 +977,7 @@ export class Game {
     if (tx === null) return { x: p.lx, y: p.ly };
     const dx = tx - g.x;
     const dy = ty - g.y;
-    const d = Math.hypot(dx, dy);
+    const d = len(dx, dy);
     return d < 4 ? { x: p.lx, y: p.ly } : { x: dx / d, y: dy / d };
   }
 
@@ -925,7 +986,7 @@ export class Game {
     const h = this.held;
     let ix = (h.has('right') ? 1 : 0) - (h.has('left') ? 1 : 0);
     let iy = (h.has('down') ? 1 : 0) - (h.has('up') ? 1 : 0);
-    const il = Math.hypot(ix, iy);
+    const il = len(ix, iy);
     if (il) (ix /= il), (iy /= il);
 
     p.dashCool -= dt;
@@ -951,9 +1012,9 @@ export class Game {
     p.y += p.vy * dt;
     collide(p);
 
-    if (this.aimMode === 'facing' && il) [p.lx, p.ly] = [ix, iy];
+    if (this.aimMode === 'facing' && il) (p.lx = ix), (p.ly = iy);
     const aim = this.aimDir(p);
-    if (this.aimMode !== 'facing') [p.lx, p.ly] = [aim.x, aim.y];
+    if (this.aimMode !== 'facing') (p.lx = aim.x), (p.ly = aim.y);
     p.kick = Math.max(0, p.kick - dt);
     p.blink -= dt;
     if (p.blink < -0.13) p.blink = rand(2, 4.5);
@@ -976,7 +1037,7 @@ export class Game {
         const sp = w.speed * (w.pellets > 1 ? rand(0.85, 1.1) : 1);
         this.bullets.push({
           x: bx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: w.life * (w.pellets > 1 ? rand(0.8, 1.15) : 1),
-          dmg: w.dmg + l.dmg, pierce: w.pierce + l.pierce, bounce: w.bounce, size: w.size, color: w.color, hit: new Set(),
+          dmg: w.dmg + l.dmg, pierce: w.pierce + l.pierce, bounce: w.bounce, size: w.size, color: w.color, hit: null,
         });
       }
       this.sparks.add(bx, by, GUN_Z, aim.x * 30, aim.y * 30, 0, 0.06, PAL.y);
@@ -988,13 +1049,16 @@ export class Game {
     }
     p.inv -= dt;
     p.rapid -= dt;
-    p.anim += Math.hypot(p.vx, p.vy) * dt;
+    p.anim += len(p.vx, p.vy) * dt;
 
     for (const e of this.enemies) {
       if (p.inv > 0 || e.hp <= 0 || e.z > 18) continue;
-      if (Math.hypot(p.x - e.x, p.y - e.y) < p.r + e.r - 1) {
-        const d = Math.hypot(p.x - e.x, p.y - e.y) || 1;
-        this.hurt(p, (p.x - e.x) / d, (p.y - e.y) / d);
+      const dx = p.x - e.x;
+      const dy = p.y - e.y;
+      const reach = p.r + e.r - 1;
+      if (dx * dx + dy * dy < reach * reach) {
+        const d = len(dx, dy) || 1;
+        this.hurt(p, dx / d, dy / d);
       }
     }
   }
@@ -1035,9 +1099,14 @@ export class Game {
   // ── Bugs ──
   private target(): { x: number; y: number } {
     const p = this.player;
-    if (p && !p.dead) return { x: p.x, y: p.y };
-    // No one to chase: drift after a point that roams the room.
-    return { x: 160 + Math.sin(this.time * 0.35) * 120, y: 110 + Math.sin(this.time * 0.53) * 50 };
+    const t = this.tgt;
+    if (p && !p.dead) (t.x = p.x), (t.y = p.y);
+    else {
+      // No one to chase: drift after a point that roams the room.
+      t.x = 160 + Math.sin(this.time * 0.35) * 120;
+      t.y = 110 + Math.sin(this.time * 0.53) * 50;
+    }
+    return t;
   }
 
   // Head for (tx, ty), sliding round furniture: try the straight line, then
@@ -1045,13 +1114,18 @@ export class Game {
   private steer(e: Enemy, tx: number, ty: number, speed: number) {
     const base = Math.atan2(ty - e.y, tx - e.x);
     const look = e.r + 6;
-    for (const off of [0, 0.5, -0.5, 1, -1, 1.6, -1.6]) {
-      const a = base + off * e.dir;
-      if (!blocked(e.x + Math.cos(a) * look, e.y + Math.sin(a) * look, e.r)) {
-        return { x: Math.cos(a) * speed, y: Math.sin(a) * speed };
+    let a = base;
+    for (const off of STEER_FAN) {
+      const t = base + off * e.dir;
+      if (!blocked(e.x + Math.cos(t) * look, e.y + Math.sin(t) * look, e.r)) {
+        a = t;
+        break;
       }
     }
-    return { x: Math.cos(base) * speed, y: Math.sin(base) * speed };
+    const w = this.want;
+    w.x = Math.cos(a) * speed;
+    w.y = Math.sin(a) * speed;
+    return w;
   }
 
   private updateEnemy(e: Enemy, dt: number) {
@@ -1059,7 +1133,7 @@ export class Game {
     e.flash -= dt;
     if (e.kind === 'king') return this.updateKing(e, dt);
     const tgt = this.target();
-    const dist = Math.hypot(tgt.x - e.x, tgt.y - e.y);
+    const dist = len(tgt.x - e.x, tgt.y - e.y);
 
     if (e.kind === 'flyer') {
       // Flyers hover over everything, weaving as they come.
@@ -1085,7 +1159,8 @@ export class Game {
         e.ry = (tgt.y - e.y) / (dist || 1);
       }
     }
-    let want = { x: 0, y: 0 };
+    let want = this.want;
+    want.x = want.y = 0;
     if (e.wind > 0) {
       e.wind -= dt;
       if (e.wind <= 0) {
@@ -1096,7 +1171,8 @@ export class Game {
     } else if (e.rush > 0) {
       e.rush -= dt;
       const s = e.kind === 'boss' ? 190 : e.speed * 2.8;
-      want = { x: e.rx * s, y: e.ry * s };
+      want.x = e.rx * s;
+      want.y = e.ry * s;
       if (e.rush <= 0) e.next = e.kind === 'boss' ? rand(2.5, 4) : rand(1.2, 2.6);
     } else {
       want = this.steer(e, tgt.x, tgt.y, e.speed);
@@ -1115,7 +1191,7 @@ export class Game {
     const by = e.y;
     collide(e);
     // Stuck on furniture: go round the other way next time.
-    if (Math.hypot(e.x - bx, e.y - by) > 0.5 && Math.random() < 0.05) e.dir = e.dir > 0 ? -1 : 1;
+    if (len(e.x - bx, e.y - by) > 0.5 && Math.random() < 0.05) e.dir = e.dir > 0 ? -1 : 1;
   }
 
   // The Root Bug walks you down, then winds up one of four moves: a charge,
@@ -1125,8 +1201,9 @@ export class Game {
     const tgt = this.target();
     const dx = tgt.x - e.x;
     const dy = tgt.y - e.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    let want = { x: 0, y: 0 };
+    const dist = len(dx, dy) || 1;
+    let want = this.want;
+    want.x = want.y = 0;
     if (e.wind > 0) {
       e.wind -= dt;
       // A slam rears up first; everything else just trembles.
@@ -1135,7 +1212,8 @@ export class Game {
     } else if (e.rush > 0) {
       e.rush -= dt;
       const s = e.rage ? 230 : 200;
-      want = { x: e.rx * s, y: e.ry * s };
+      want.x = e.rx * s;
+      want.y = e.ry * s;
       if (Math.random() < 0.5) this.dust(e.x + rand(-8, 8), e.y, 1);
       if (e.rush <= 0) e.next = e.rage ? rand(0.9, 1.6) : rand(1.4, 2.3);
     } else {
@@ -1214,30 +1292,30 @@ export class Game {
       s.y += s.vy * dt;
       s.life -= dt;
       const wall = s.x < ARENA.x0 || s.x > ARENA.x1 || s.y < ARENA.y0 || s.y > ARENA.y1;
-      const prop = PROPS.some((q) => q.stopsShots && s.x > q.x && s.x < q.x + q.w && s.y > q.y && s.y < q.y + q.h + 2);
+      const prop = stopsShot(s.x, s.y);
       if (wall || prop) {
         s.life = 0;
         this.puff(s.x, s.y, 4, PAL.l, 4);
-      } else if (open && Math.hypot(p.x - s.x, p.y - s.y) < p.r + 2) {
+      } else if (open && len(p.x - s.x, p.y - s.y) < p.r + 2) {
         s.life = 0;
-        const d = Math.hypot(s.vx, s.vy) || 1;
+        const d = len(s.vx, s.vy) || 1;
         this.hurt(p, s.vx / d, s.vy / d);
       }
     }
-    this.spit = this.spit.filter((s) => s.life > 0);
+    prune(this.spit, lasts);
     for (const w of this.waves) {
       w.r += w.speed * dt;
       // Seen in perspective, the ring is squashed: measure in floor space.
       if (open && !w.hit && p.z === 0) {
-        const d = Math.hypot(p.x - w.x, (p.y - w.y) / 0.6);
+        const d = len(p.x - w.x, (p.y - w.y) / 0.6);
         if (Math.abs(d - w.r) < 3) {
           w.hit = true;
-          const n = Math.hypot(p.x - w.x, p.y - w.y) || 1;
+          const n = len(p.x - w.x, p.y - w.y) || 1;
           this.hurt(p, (p.x - w.x) / n, (p.y - w.y) / n);
         }
       }
     }
-    this.waves = this.waves.filter((w) => w.r < w.max);
+    prune(this.waves, spreading);
   }
 
   // ── The fall to B1 ──
@@ -1246,7 +1324,7 @@ export class Game {
     for (let y = FLOOR_TOP; y < FRONT; y += TILE_H) {
       for (let x = SIDE; x < VIEW_W - SIDE; x += TILE_W) {
         // Outward from the impact, a little ragged.
-        const d = Math.hypot(x + TILE_W / 2 - king.x, (y + TILE_H / 2 - king.y) / 0.6);
+        const d = len(x + TILE_W / 2 - king.x, (y + TILE_H / 2 - king.y) / 0.6);
         tiles.push({ x, y, at: BREAK + d / 240 + rand(0, 0.16), h: 0, v: 0 });
       }
     }
@@ -1484,7 +1562,7 @@ export class Game {
     // The crater: crushed tile, darker at the heart.
     for (let y = -5; y <= 5; y++) {
       for (let x = -9; x <= 9; x++) {
-        const d = Math.hypot(x / 9, y / 5) + rand(-0.12, 0.12);
+        const d = len(x / 9, y / 5) + rand(-0.12, 0.12);
         if (d > 1 || !inside(ix + x, iy + y)) continue;
         g.fillStyle = d < 0.45 ? '#7E7A71' : d < 0.75 ? '#A39F95' : '#C4C0B6';
         g.fillRect(Math.round(ix + x), Math.round(iy + y), 1, 1);
@@ -1508,7 +1586,7 @@ export class Game {
         if ((a.kind === 'flyer') !== (b.kind === 'flyer')) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const d = Math.hypot(dx, dy);
+        const d = len(dx, dy);
         const min = a.r + b.r;
         if (d >= min || d < 0.001) continue;
         const push = (min - d) / 2;
@@ -1598,24 +1676,29 @@ export class Game {
         b.bounce -= 1;
         if (outX) (b.vx = -b.vx), (b.x = clamp(b.x, ARENA.x0, ARENA.x1));
         if (outY) (b.vy = -b.vy), (b.y = clamp(b.y, FLOOR_TOP, FRONT));
-        b.hit.clear();
+        b.hit = null;
         this.puff(b.x, b.y, 2, PAL.l, GUN_Z);
         tone(1600, 1200, 0.03, 0.03, 'triangle');
       }
       const wall = b.x < ARENA.x0 || b.x > ARENA.x1 || b.y < FLOOR_TOP || b.y > FRONT;
-      const hitProp = PROPS.some((p) => p.stopsShots && b.x > p.x && b.x < p.x + p.w && b.y > p.y && b.y < p.y + p.h + 2);
+      const hitProp = stopsShot(b.x, b.y);
       if (wall || hitProp) {
         b.life = 0;
         this.puff(b.x, b.y, 3, PAL.m, GUN_Z);
         continue;
       }
-      const speed = Math.hypot(b.vx, b.vy) || 1;
       for (const e of this.enemies) {
-        if (e.hp <= 0 || b.hit.has(e)) continue;
-        if (Math.hypot(b.x - e.x, b.y - e.y) < e.r + 1 + b.size / 2) {
+        if (e.hp <= 0 || b.hit?.includes(e)) continue;
+        const reach = e.r + 1 + b.size / 2;
+        const dx = b.x - e.x;
+        const dy = b.y - e.y;
+        if (dx * dx + dy * dy < reach * reach) {
+          const speed = len(b.vx, b.vy) || 1;
           this.hitEnemy(e, b.vx / speed, b.vy / speed, b.dmg);
-          b.hit.add(e);
-          if (b.pierce > 0) b.pierce -= 1;
+          if (b.pierce > 0) {
+            b.pierce -= 1;
+            (b.hit ??= []).push(e);
+          }
           else {
             b.life = 0;
             break;
@@ -1623,7 +1706,7 @@ export class Game {
         }
       }
     }
-    this.bullets = this.bullets.filter((b) => b.life > 0);
+    prune(this.bullets, lasts);
   }
 
   private updatePickups(dt: number) {
@@ -1634,7 +1717,7 @@ export class Game {
       k.z = Math.max(0, k.z + k.vz * dt);
       if (k.z === 0) k.vz = Math.abs(k.vz) > 30 ? -k.vz * 0.4 : 0;
       // Chips roll to the player once they've landed (anything does, with the magnet).
-      const d = p && !p.dead ? Math.hypot(p.x - k.x, p.y - k.y) : Infinity;
+      const d = p && !p.dead ? len(p.x - k.x, p.y - k.y) : Infinity;
       // Chips always come home once they've landed; hearts and bolts only to the magnet.
       const homing = k.kind === 'chip' ? k.life < 11.4 : this.loadout.magnet && d < 120;
       if (p && homing && d > 0.5) {
@@ -1660,7 +1743,7 @@ export class Game {
         tone(990, 1980, 0.12, 0.06, 'triangle', 0.06);
       }
     }
-    this.pickups = this.pickups.filter((k) => k.life > 0);
+    prune(this.pickups, lasts);
   }
 
   private updateFx(dt: number) {
@@ -1670,7 +1753,7 @@ export class Game {
       pop.life -= dt;
       pop.y -= 14 * dt;
     }
-    this.pops = this.pops.filter((pop) => pop.life > 0);
+    prune(this.pops, lasts);
   }
 
   private puff(x: number, y: number, n: number, color: string, z = 6) {
@@ -1690,35 +1773,33 @@ export class Game {
   }
 
   private shake(k: number, t: number) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (this.still.matches) return;
     this.shakeK = Math.max(this.shakeT > 0 ? this.shakeK : 0, k);
     this.shakeT = Math.max(this.shakeT, t);
   }
 
+  // Runs every tick, so it only builds a new HUD when something on it changed.
   private pushHud() {
     const p = this.player;
-    const hud: Hud = {
-      round: this.round,
-      score: this.score,
-      best: Math.max(this.best, this.score),
-      hp: p ? Math.max(0, p.hp) : 0,
-      maxHp: this.loadout.maxHp,
-      chips: this.chips,
-      weapon: WEAPONS[this.loadout.weapon].name,
-      weaponId: this.loadout.weapon,
-      mult: this.mult(),
-      rapid: !!p && p.rapid > 0,
-    };
-    const key = `${hud.round}|${hud.score}|${hud.best}|${hud.hp}|${hud.maxHp}|${hud.chips}|${hud.weaponId}|${hud.mult}|${hud.rapid}`;
-    if (key === this.lastHud) return;
-    // At most ten updates a second, except when health changes.
+    const last = this.lastHud;
+    const hp = p ? Math.max(0, p.hp) : 0;
+    const rapid = !!p && p.rapid > 0;
+    const mult = this.mult();
+    const best = Math.max(this.best, this.score);
+    const l = this.loadout;
+    if (
+      last && last.round === this.round && last.score === this.score && last.best === best && last.hp === hp &&
+      last.maxHp === l.maxHp && last.chips === this.chips && last.weaponId === l.weapon && last.mult === mult && last.rapid === rapid
+    ) return;
+    // At most ten updates a second, except when health or the round changes.
     const now = performance.now();
-    if (now - this.hudAt < 100 && hud.hp === this.hudHp && hud.round === this.hudRound) return;
-    this.lastHud = key;
+    if (last && now - this.hudAt < 100 && hp === last.hp && this.round === last.round) return;
     this.hudAt = now;
-    this.hudHp = hud.hp;
-    this.hudRound = hud.round;
-    this.hooks.hud(hud);
+    this.lastHud = {
+      round: this.round, score: this.score, best, hp, maxHp: l.maxHp, chips: this.chips,
+      weapon: WEAPONS[l.weapon].name, weaponId: l.weapon, mult, rapid,
+    };
+    this.hooks.hud(this.lastHud);
   }
 
   // ── Drawing: the room ──
@@ -2040,7 +2121,7 @@ export class Game {
           c.fillRect(d.x - 8, FLOOR_TOP - 23, 1, 23);
           c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, 1, 23);
         }
-        const k = this.doors.filter((x) => x.side === 'back').indexOf(d);
+        const k = this.back.indexOf(d);
         const kind = (this.phase === 'lifts' || this.phase === 'riding' || this.mode === 'offer') ? this.lifts[k] : undefined;
         if (kind) {
           // Where this lift goes: a sign on a plate over the door.
@@ -2084,7 +2165,7 @@ export class Game {
   // when it's not holding anything.
   private arm(from: { x: number; y: number }, to: { x: number; y: number }, bareHand: boolean) {
     const c = this.ctx;
-    const n = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+    const n = Math.max(1, Math.ceil(len(to.x - from.x, to.y - from.y)));
     const pts = Array.from({ length: n + 1 }, (_, i) => ({
       x: Math.round(from.x + ((to.x - from.x) * i) / n),
       y: Math.round(from.y + ((to.y - from.y) * i) / n),
@@ -2136,7 +2217,7 @@ export class Game {
     const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
     const [view, mirror] = PERSON_VIEW[oct];
     const f = this.person[view];
-    const moving = Math.hypot(p.vx, p.vy) > 10;
+    const moving = len(p.vx, p.vy) > 10;
     const step = Math.floor(p.anim / 6) % 2;
     const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
     // A bob: on every step, or a slow breath when standing.
@@ -2240,19 +2321,12 @@ export class Game {
     // entries rather than a fresh array of closures every frame: less garbage
     // for the collector in long, busy rounds.
     const list = this.drawList;
-    let n = 0;
-    const put = (y: number, kind: number, ref: unknown) => {
-      const it = list[n] ?? (list[n] = { y: 0, kind: 0, ref: null });
-      it.y = y;
-      it.kind = kind;
-      it.ref = ref;
-      n++;
-    };
-    for (const pr of PROPS) put(pr.y + pr.h, 0, pr);
-    for (const k of this.pickups) if (!(k.life < 2 && Math.floor(k.life * 10) % 2)) put(k.y, 1, k);
-    for (const e of this.enemies) put(e.y, 2, e);
-    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) put(p.y, 3, p);
-    list.length = Math.max(list.length, n);
+    this.drawn = 0;
+    for (const pr of PROPS) this.put(pr.y + pr.h, 0, pr);
+    for (const k of this.pickups) if (!(k.life < 2 && Math.floor(k.life * 10) % 2)) this.put(k.y, 1, k);
+    for (const e of this.enemies) this.put(e.y, 2, e);
+    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) this.put(p.y, 3, p);
+    const n = this.drawn;
     // Insertion sort: the order barely changes between frames, so it's near-linear.
     for (let i = 1; i < n; i++) {
       const it = list[i];
@@ -2274,7 +2348,7 @@ export class Game {
     // Shots and sparks on top.
     for (const b of this.bullets) {
       const sy = b.y - GUN_Z;
-      const sp2 = Math.hypot(b.vx, b.vy) || 1;
+      const sp2 = len(b.vx, b.vy) || 1;
       const h = Math.floor(b.size / 2);
       c.fillStyle = b.color;
       c.fillRect(Math.round(b.x - h), Math.round(sy - h), b.size, b.size);
@@ -2301,28 +2375,41 @@ export class Game {
     for (const pop of this.pops) drawText(c, pop.text, pop.x, pop.y, pop.life > 0.2 || Math.floor(pop.life * 20) % 2 ? PAL.k : PAL.r);
   }
 
-  // A shockwave: a pixel ellipse along the floor, brass with a rust edge.
-  // All its pixels go in one path and one fill.
+  private put(y: number, kind: number, ref: unknown) {
+    const list = this.drawList;
+    const it = list[this.drawn] ?? (list[this.drawn] = { y: 0, kind: 0, ref: null });
+    it.y = y;
+    it.kind = kind;
+    it.ref = ref;
+    this.drawn++;
+  }
+
+  // A shockwave: a pixel ellipse along the floor, brass (rust in a rage)
+  // with an ink ring inside.
   private drawWave(w: Wave) {
+    this.ring(w, w.r, this.king()?.rage ? PAL.r : PAL.y);
+    this.ring(w, w.r - 2, PAL.k);
+  }
+
+  // All of a ring's pixels go in one path and one fill.
+  private ring(w: Wave, r: number, color: string) {
+    if (r <= 0) return;
     const c = this.ctx;
-    for (const [dr, color] of [[0, this.king()?.rage ? PAL.r : PAL.y], [-2, PAL.k]] as const) {
-      const r = w.r + dr;
-      if (r <= 0) continue;
-      const n = Math.ceil(r * 5);
-      c.beginPath();
-      let lx = NaN;
-      let ly = NaN;
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2;
-        const x = Math.round(w.x + Math.cos(a) * r);
-        const y = Math.round(w.y + Math.sin(a) * r * 0.6);
-        if ((x === lx && y === ly) || x < ARENA.x0 || x > ARENA.x1 || y < FLOOR_TOP || y > FRONT) continue;
-        c.rect(x, y, 1, 1);
-        [lx, ly] = [x, y];
-      }
-      c.fillStyle = color;
-      c.fill();
+    const n = Math.ceil(r * 5);
+    c.beginPath();
+    let lx = NaN;
+    let ly = NaN;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const x = Math.round(w.x + Math.cos(a) * r);
+      const y = Math.round(w.y + Math.sin(a) * r * 0.6);
+      if ((x === lx && y === ly) || x < ARENA.x0 || x > ARENA.x1 || y < FLOOR_TOP || y > FRONT) continue;
+      c.rect(x, y, 1, 1);
+      lx = x;
+      ly = y;
     }
+    c.fillStyle = color;
+    c.fill();
   }
 
   // Mid-fall: the office breaking up and going up out of view, B1 coming up
