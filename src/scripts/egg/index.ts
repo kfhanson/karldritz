@@ -15,6 +15,7 @@ let lastClick = 0;
 let impact: { x: number; y: number } | null = null;
 let healTimer: ReturnType<typeof setTimeout> | undefined;
 let broken = false; // shattered, or the arcade is open
+let keyNav = false; // the logo was pressed from the keyboard and is taking us home
 
 // When the page will be still enough to photograph: after a navigation has
 // landed, and after a fresh load's intro has played (performance.now() counts
@@ -56,7 +57,7 @@ function onClick(e: MouseEvent) {
     if (here) {
       e.preventDefault();
       if (scrollY > 0) window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    } else keyNav = e.detail === 0;
     return;
   }
   e.preventDefault();
@@ -81,6 +82,8 @@ function onClick(e: MouseEvent) {
     loadGlass().then(async (g) => {
       await g.shatter(at);
       broken = false;
+      // Back from the arcade: focus returns to what opened it.
+      document.querySelector<HTMLElement>('#site-nav .nav-brand')?.focus({ preventScroll: true });
     });
     return;
   }
@@ -107,5 +110,13 @@ export function initEasterEgg() {
   document.addEventListener('astro:after-swap', () => {
     settled = performance.now() + 900;
     glass?.then((g) => g.settle(settled));
+  });
+  // The swap drops focus to the page. Someone pressing Enter on the logo
+  // gets it back there, so the next press still lands on it (the router's
+  // live region still announces the new page).
+  document.addEventListener('astro:page-load', () => {
+    if (!keyNav) return;
+    keyNav = false;
+    document.querySelector<HTMLElement>('#site-nav .nav-brand')?.focus({ preventScroll: true });
   });
 }
