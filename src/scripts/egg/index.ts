@@ -25,6 +25,51 @@ let settled = INTRO_MS;
 
 const loadGlass = () => (glass ??= import('./glass'));
 
+// Click two: a hairline crack where it landed, fading about as fast as the
+// streak would lapse. Enough to say the logo is glass before the real crack
+// on click three grows from the same spot. Drawn here, not by the glass
+// module, which is only starting to load.
+let hairline: SVGSVGElement | null = null;
+let hairlineAt: { x: number; y: number } | null = null;
+
+function tease(at: { x: number; y: number }) {
+  hairline?.remove();
+  hairlineAt = at;
+  let d = '';
+  const n = 4 + Math.round(Math.random());
+  for (let k = 0; k < n; k++) {
+    // A ray with one kink, like the main cracks.
+    const a = ((k + Math.random() * 0.6) / n) * Math.PI * 2;
+    const len = 8 + Math.random() * 9;
+    const bend = a + (Math.random() - 0.5) * 0.7;
+    const mx = Math.cos(a) * len * 0.55;
+    const my = Math.sin(a) * len * 0.55;
+    d += `M0 0L${mx.toFixed(1)} ${my.toFixed(1)}L${(mx + Math.cos(bend) * len * 0.45).toFixed(1)} ${(my + Math.sin(bend) * len * 0.45).toFixed(1)}`;
+  }
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '-20 -20 40 40');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.cssText = `position:fixed;left:${at.x - 20}px;top:${at.y - 20}px;width:40px;height:40px;z-index:2147483000;pointer-events:none;overflow:visible`;
+  // A light line beside a dark one, so it reads on any background.
+  svg.innerHTML =
+    `<g fill="none" stroke-linecap="round" stroke-linejoin="round">` +
+    `<path d="${d}" pathLength="1" transform="translate(.6 .6)" stroke="rgba(255,255,255,.85)" stroke-width="1.6"/>` +
+    `<path d="${d}" pathLength="1" stroke="rgba(17,17,17,.55)" stroke-width="1"/></g>` +
+    `<circle r="1.3" fill="rgba(255,255,255,.9)" stroke="rgba(17,17,17,.5)" stroke-width=".6"/>`;
+  document.documentElement.appendChild(svg);
+  hairline = svg;
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    for (const path of svg.querySelectorAll('path')) {
+      path.style.strokeDasharray = '1';
+      path.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 90, easing: 'ease-out', fill: 'both' });
+    }
+  }
+  svg.animate([{ opacity: 1 }, { opacity: 1, offset: 0.5 }, { opacity: 0 }], { duration: 1000, fill: 'forwards' }).onfinish = () => {
+    svg.remove();
+    if (hairline === svg) hairline = null;
+  };
+}
+
 function onClick(e: MouseEvent) {
   // While broken the glass or the arcade covers the logo anyway.
   if (broken || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -54,6 +99,7 @@ function onClick(e: MouseEvent) {
   // nowhere to go: scroll up instead of replaying the intro under the cursor.
   const here = new URL(brand.href).pathname === location.pathname;
   if (streak === 1) {
+    hairlineAt = null;
     if (here) {
       e.preventDefault();
       if (scrollY > 0) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -62,15 +108,16 @@ function onClick(e: MouseEvent) {
   }
   e.preventDefault();
 
+  // Keyboard activation has no pointer position — crack from the logo's centre.
+  const point = e.detail === 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY };
   if (streak === 2) {
+    tease(point);
     loadGlass().then((g) => g.warm(settled));
     return;
   }
 
-  // Keyboard activation has no pointer position — crack from the logo's centre.
-  if (!impact) {
-    impact = e.detail === 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : { x: e.clientX, y: e.clientY };
-  }
+  // The crack grows from where the hairline was.
+  impact ??= hairlineAt ?? point;
   const at = impact;
   const hit = streak - CRACK_FROM + 1;
   clearTimeout(healTimer);
@@ -88,7 +135,13 @@ function onClick(e: MouseEvent) {
     return;
   }
 
-  loadGlass().then((g) => g.crack(hit, at));
+  loadGlass().then((g) => {
+    g.crack(hit, at);
+    // The real crack paints on the next frame; the hairline goes with it.
+    const h = hairline;
+    hairline = null;
+    if (h) requestAnimationFrame(() => h.remove());
+  });
   healTimer = setTimeout(async () => {
     const g = await loadGlass();
     // A hit while it mends picks the streak back up; only a full heal ends it.
