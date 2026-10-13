@@ -414,14 +414,6 @@
   color: #e2b45a;
   text-shadow: 0 0 2px var(--a-ink);
 }
-.ea-banner.is-on {
-  animation: ea-banner 1.7s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes ea-banner {
-  0% { opacity: 0; transform: translateY(10px); }
-  15%, 75% { opacity: 1; transform: none; }
-  100% { opacity: 0; transform: translateY(-6px); }
-}
 
 .ea-help {
   display: flex;
@@ -542,13 +534,8 @@
   .ea-top, .ea-frame, .ea-help {
     transform: none !important;
   }
-  .ea-dot,
-  .ea-banner.is-on {
+  .ea-dot {
     animation-duration: 0.01s;
-  }
-  .ea-banner.is-on {
-    animation: none;
-    opacity: 1;
   }
 }
 

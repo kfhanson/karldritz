@@ -205,18 +205,31 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (!active) frame.focus({ preventScroll: true });
   };
 
-  let bannerTimer: ReturnType<typeof setTimeout> | undefined;
+  // The banner runs on the Web Animations API, not a CSS class: restarting a
+  // CSS animation takes a forced layout, and "Round 1" lands just as the
+  // menu closes, when that layout costs the most.
+  let bannerAnim: Animation | null = null;
+  const BANNER_IN: Keyframe[] = [
+    { opacity: 0, transform: 'translateY(10px)' },
+    { opacity: 1, transform: 'none', offset: 0.15 },
+    { opacity: 1, transform: 'none', offset: 0.75 },
+    { opacity: 0, transform: 'translateY(-6px)' },
+  ];
+  // Reduced motion: it simply shows, then goes.
+  const BANNER_STILL: Keyframe[] = [{ opacity: 1 }, { opacity: 1, offset: 0.99 }, { opacity: 0 }];
   const game = new Game(canvas, {
     hud: (h: Hud) => renderHud(h),
     banner: (title, sub, dark) => {
       $('[data-banner-title]').textContent = title;
       banner.classList.toggle('is-dark', !!dark);
       $('[data-banner-sub]').textContent = sub ?? '';
-      banner.classList.remove('is-on');
-      void banner.offsetWidth;
-      banner.classList.add('is-on');
-      clearTimeout(bannerTimer);
-      bannerTimer = setTimeout(() => banner.classList.remove('is-on'), 1700);
+      const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      bannerAnim?.cancel();
+      bannerAnim = banner.animate(still ? BANNER_STILL : BANNER_IN, {
+        duration: 1700,
+        easing: still ? 'linear' : 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'both',
+      });
     },
     offer: (o: Offer) => openOffer(o),
     over: ({ score, round, best, record }) => {
@@ -593,7 +606,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
           shards?.destroy();
           game.destroy();
           ro.disconnect();
-          clearTimeout(bannerTimer);
+          bannerAnim?.cancel();
           window.removeEventListener('keydown', onKey, true);
           window.removeEventListener('keyup', onKey, true);
           window.removeEventListener('blur', onBlur);

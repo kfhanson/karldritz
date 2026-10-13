@@ -25,7 +25,12 @@ let settled = INTRO_MS;
 const loadGlass = () => (glass ??= import('./glass'));
 
 function onClick(e: MouseEvent) {
-  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  // While broken the glass or the arcade covers the logo anyway.
+  if (broken || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  // Every click on every page comes through here. Only ones on the logo, or on
+  // <html> mid-transition, are worth the layout read below.
+  const target = e.target as Element | null;
+  if (target !== document.documentElement && !target?.closest?.('.nav-brand')) return;
   const brand = document.querySelector<HTMLAnchorElement>('#site-nav .nav-brand');
   if (!brand) return;
   // Count by position, not target: mid view-transition the click lands on
@@ -34,8 +39,7 @@ function onClick(e: MouseEvent) {
   const onBrand = e.detail === 0
     ? (e.target as Element | null)?.closest?.('.nav-brand') === brand
     : e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-  // While broken the glass or the arcade covers the logo anyway.
-  if (!onBrand || broken) return;
+  if (!onBrand) return;
 
   // The event's own timestamp, not "now": if the main thread is busy for a
   // moment, queued clicks still count as the streak they were.
