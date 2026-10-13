@@ -9,73 +9,31 @@
 // sparks) carry a z and are drawn that far up the screen, with a shadow on
 // the floor. Everything is drawn back to front by its y.
 // Fixed 60 Hz simulation on a 320×184 pixel canvas.
+//
+// This file is the game itself: rounds, the player, the bugs, the fall
+// between floors, and drawing the scene. The room and its physics are in
+// world.ts, each floor's look and furniture in floors/, and the quake's
+// shapes in quake.ts.
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
 import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW } from './people';
+import { drawProp, FLOORS } from './floors';
+import { BREAK, crackReach, DEPTH, FALL_G, paintCracks, SLAM, TILE_H, TILE_W, tileAt, type Faller, type Quake, type Rubble, type Tile } from './quake';
+import {
+  ARENA, blocked, clamp, collide, DOORS, FLOOR_TOP, FRONT, len, PROPS, prune, rand, setProps, SHADOW, SIDE, Sparks, stopsShot,
+  VIEW_H, VIEW_W, WALL_TOP, type Body, type DoorSide, type Prop,
+} from './world';
 import { freshLoadout, liftKinds, LIFT_LABEL, makeOffer, WEAPONS, type Ctx, type Loadout, type Offer, type OfferKind } from './upgrades';
 
-export const VIEW_W = 320;
-export const VIEW_H = 184;
+export { VIEW_H, VIEW_W };
 
-// ── The room ──
-const WALL_TOP = 8; // top edge of the back wall on screen
-const FLOOR_TOP = 40; // where the back wall meets the floor
-const SIDE = 10; // side wall thickness
-const FRONT = 176; // the low front wall
-const ARENA = { x0: SIDE + 2, x1: VIEW_W - SIDE - 2, y0: FLOOR_TOP + 4, y1: FRONT - 2 };
+// Who stays in a list for another tick.
+const lasts = (x: { life: number }) => x.life > 0;
+const alive = (e: { hp: number; life: number }) => e.hp > 0 && e.life > 0;
+const spreading = (w: { r: number; max: number }) => w.r < w.max;
 
-type PropKind = 'desk' | 'pillar' | 'plant' | 'rack' | 'server' | 'column' | 'crate';
-interface Prop {
-  kind: PropKind;
-  x: number; // footprint on the floor
-  y: number;
-  w: number;
-  h: number;
-  height: number; // how tall it stands, for drawing
-  stopsShots: boolean;
-}
-const prop = (kind: PropKind, x: number, y: number, w: number, h: number, height: number, stopsShots = false): Prop =>
-  ({ kind, x, y, w, h, height, stopsShots });
-const OFFICE_PROPS: Prop[] = [
-  prop('pillar', 84, 92, 12, 7, 46, true),
-  prop('pillar', 224, 92, 12, 7, 46, true),
-  prop('desk', 34, 64, 30, 9, 8),
-  prop('desk', 256, 64, 30, 9, 8),
-  prop('desk', 40, 140, 30, 9, 8),
-  prop('desk', 250, 140, 30, 9, 8),
-  prop('rack', 146, 154, 28, 8, 30, true),
-  prop('plant', 120, 60, 6, 4, 14),
-  prop('plant', 194, 60, 6, 4, 14),
-  prop('plant', 20, 104, 6, 4, 14),
-  prop('plant', 294, 104, 6, 4, 14),
-];
-// B1, the server room the Root Bug smashes through to. The columns stand
-// under the office pillars; the middle is left open for the fight.
-const SERVER_PROPS: Prop[] = [
-  prop('column', 84, 92, 12, 7, 46, true),
-  prop('column', 224, 92, 12, 7, 46, true),
-  prop('server', 30, 66, 30, 8, 30, true),
-  prop('server', 260, 66, 30, 8, 30, true),
-  prop('server', 30, 140, 30, 8, 30, true),
-  prop('server', 260, 140, 30, 8, 30, true),
-  prop('crate', 126, 150, 12, 8, 10),
-  prop('crate', 184, 58, 12, 8, 10),
-  prop('crate', 20, 106, 10, 7, 9),
-];
-const FLOOR_PROPS = [OFFICE_PROPS, SERVER_PROPS];
-// The floor in play. Module-level so the collision helpers can reach it;
-// only one game runs at a time.
-let PROPS = OFFICE_PROPS;
-
-// Where bugs come in: three lifts in the back wall, a door in each side wall.
-type DoorSide = 'back' | 'left' | 'right';
-const DOORS: { x: number; y: number; side: DoorSide }[] = [
-  { x: 112, y: FLOOR_TOP, side: 'back' },
-  { x: 160, y: FLOOR_TOP, side: 'back' },
-  { x: 208, y: FLOOR_TOP, side: 'back' },
-  { x: SIDE, y: 118, side: 'left' },
-  { x: VIEW_W - SIDE, y: 118, side: 'right' },
-];
+// The headings a bug tries, nearest first, to get round furniture.
+const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
 
 const KING_ROUND = 25;
 
@@ -88,36 +46,7 @@ const BULLET = 300;
 const GUN_Z = PERSON_SHOULDER; // shots fly at shoulder height
 const REACH = 4; // how far the gun hand is from the shoulder
 
-// Office colours, kept to the site palette plus glass and steel.
-const WALL = '#F1EFE9';
-const FLOOR_A = '#ECEAE3';
-const FLOOR_B = '#E7E4DC';
-const GROUT = '#DDD9D0';
-const RUG = '#D9E0DA';
-const GLASS = '#E2E7E5';
-const SKYLINE = '#CDD4D0';
-const MULLION = '#9C9B94';
-const STEEL = '#BDBBB3';
-const STEEL_HI = '#D6D4CD';
-const SHADOW = 'rgba(17,17,17,0.16)';
-// B1: concrete and steel, darker than the office upstairs.
-const B1_WALL = '#7A7D77';
-const B1_WALL_D = '#6E716B';
-const B1_FLOOR = '#585C57';
-const B1_FLOOR_B = '#545853';
-const B1_JOINT = '#474B46';
-
-type Kind = 'crawler' | 'flyer' | 'brute' | 'boss' | 'king';
-
-interface Body {
-  x: number; // feet on the floor
-  y: number;
-  z: number; // height above it
-  vx: number;
-  vy: number;
-  vz: number;
-  r: number; // footprint radius
-}
+export type Kind = 'crawler' | 'flyer' | 'brute' | 'boss' | 'king';
 
 interface Player extends Body {
   lx: number; // where it's looking (unit vector): aim, or the way it last moved
@@ -136,7 +65,7 @@ interface Player extends Body {
   dead: boolean;
 }
 
-interface Enemy extends Body {
+export interface Enemy extends Body {
   kind: Kind;
   hp: number;
   speed: number;
@@ -155,7 +84,7 @@ interface Enemy extends Body {
   rage: boolean; // the king, after the fall
 }
 
-type Move = 'none' | 'charge' | 'slam' | 'spit' | 'summon';
+export type Move = 'none' | 'charge' | 'slam' | 'spit' | 'summon';
 
 /** The king's acid: slow shots that hurt the player. */
 interface Spit {
@@ -174,61 +103,6 @@ interface Wave {
   speed: number;
   max: number;
   hit: boolean;
-}
-
-/** One office floor tile during the collapse. */
-interface Tile {
-  x: number;
-  y: number;
-  at: number; // quake time it gives way
-  h: number; // how far it has fallen
-  v: number;
-}
-
-/** A bit of rubble falling with the camera, painted onto B1 where it lands. */
-interface Rubble {
-  x: number;
-  y: number;
-  h: number;
-  v: number;
-  w: number;
-  color: string;
-}
-
-/** Something on the office floor riding a tile down. */
-interface Faller {
-  h: number;
-  v: number;
-  falling: boolean;
-  landed: boolean;
-  tx: number; // where it lands on B1, clear of the furniture there
-  ty: number;
-}
-
-// The fall from the office to B1, as one timeline (seconds):
-// rear up, slam at SLAM, cracks race out until BREAK, then tiles give way
-// outward from the impact and everything drops a DEPTH into the floor below.
-const SLAM = 0.9;
-const BREAK = 2.1;
-const DEPTH = 232;
-const FALL_G = 420;
-const TILE_W = 20;
-const TILE_H = 12;
-
-interface Quake {
-  t: number;
-  king: Enemy;
-  x: number; // impact
-  y: number;
-  cracks: HTMLCanvasElement;
-  cracked: HTMLCanvasElement; // the office floor with the cracks baked in
-  tiles: Tile[];
-  rubble: Rubble[];
-  player: Faller;
-  boss: Faller;
-  cam: number;
-  landT: number;
-  nextFx: number;
 }
 
 interface Bullet {
@@ -298,174 +172,11 @@ const STATS: Record<Kind, { r: number; score: number }> = {
   king: { r: 16, score: 1500 },
 };
 
-const rand = (a: number, b: number) => a + Math.random() * (b - a);
-const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
-// Not Math.hypot: V8 doesn't inline it, so every call boxes its arguments and
-// result as heap numbers. In the per-pair loops that was most of the game's
-// garbage. A plain square root compiles to one instruction.
-const len = (x: number, y: number) => Math.sqrt(x * x + y * y);
-
 function loadBest(): number {
   try {
     return Number(localStorage.getItem('egg-best')) || 0;
   } catch {
     return 0;
-  }
-}
-
-/**
- * Push a circle out of the room's walls and furniture. Works on locals and
- * writes the body once: repeated stores of fractions into a body's fields
- * made garbage on every call.
- */
-function collide(b: Body, solid = true, props = PROPS) {
-  const r = b.r;
-  let x = clamp(b.x, ARENA.x0 + r, ARENA.x1 - r);
-  let y = clamp(b.y, ARENA.y0 + r * 0.5, ARENA.y1);
-  if (solid) {
-    for (let i = 0; i < props.length; i++) {
-      const p = props[i];
-      const dx = x - clamp(x, p.x, p.x + p.w);
-      const dy = y - clamp(y, p.y, p.y + p.h);
-      const d2 = dx * dx + dy * dy;
-      if (d2 >= r * r) continue;
-      if (d2 > 1e-6) {
-        // Out along the line from the nearest point of the box.
-        const d = Math.sqrt(d2);
-        x += (dx / d) * (r - d);
-        y += (dy / d) * (r - d);
-      } else {
-        // Centre inside the box: out the nearest side.
-        const left = x - p.x;
-        const right = p.x + p.w - x;
-        const top = y - p.y;
-        const bottom = p.y + p.h - y;
-        const m = Math.min(left, right, top, bottom);
-        if (m === left) x = p.x - r;
-        else if (m === right) x = p.x + p.w + r;
-        else if (m === top) y = p.y - r;
-        else y = p.y + p.h + r;
-      }
-    }
-  }
-  b.x = x;
-  b.y = y;
-}
-
-/**
- * Drop the finished from a list in place. Filtering into a fresh array, for
- * six lists sixty times a second, was steady work for the garbage collector.
- */
-function prune<T>(list: T[], keep: (x: T) => boolean) {
-  let n = 0;
-  for (let i = 0; i < list.length; i++) if (keep(list[i])) list[n++] = list[i];
-  list.length = n;
-}
-const lasts = (x: { life: number }) => x.life > 0;
-const alive = (e: { hp: number; life: number }) => e.hp > 0 && e.life > 0;
-const spreading = (w: { r: number; max: number }) => w.r < w.max;
-
-// The headings a bug tries, nearest first, to get round furniture.
-const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
-
-function blocked(x: number, y: number, r: number) {
-  if (x < ARENA.x0 + r || x > ARENA.x1 - r || y < ARENA.y0 || y > ARENA.y1) return true;
-  for (let i = 0; i < PROPS.length; i++) {
-    const p = PROPS[i];
-    if (x > p.x - r && x < p.x + p.w + r && y > p.y - r && y < p.y + p.h + r) return true;
-  }
-  return false;
-}
-
-/** Whether a shot (or a glob of acid) at (x, y) has run into furniture that stops it. */
-function stopsShot(x: number, y: number) {
-  for (let i = 0; i < PROPS.length; i++) {
-    const p = PROPS[i];
-    if (p.stopsShots && x > p.x && x < p.x + p.w && y > p.y && y < p.y + p.h + 2) return true;
-  }
-  return false;
-}
-
-// Sparks, dust and debris, in a fixed pool of flat arrays. Late rounds throw
-// off hundreds a second; as objects they kept the garbage collector busy
-// enough to stall Safari. Here nothing is allocated after start-up.
-class Sparks {
-  static readonly MAX = 600;
-  n = 0;
-  private x = new Float32Array(Sparks.MAX);
-  private y = new Float32Array(Sparks.MAX);
-  private z = new Float32Array(Sparks.MAX);
-  private vx = new Float32Array(Sparks.MAX);
-  private vy = new Float32Array(Sparks.MAX);
-  private vz = new Float32Array(Sparks.MAX);
-  private life = new Float32Array(Sparks.MAX);
-  private max = new Float32Array(Sparks.MAX);
-  private col = new Uint8Array(Sparks.MAX);
-  private colors: string[] = [];
-
-  add(x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, color: string) {
-    if (this.n >= Sparks.MAX) return; // full: a few missing sparks go unnoticed
-    let c = this.colors.indexOf(color);
-    if (c < 0) c = this.colors.push(color) - 1;
-    const i = this.n++;
-    this.x[i] = x;
-    this.y[i] = y;
-    this.z[i] = z;
-    this.vx[i] = vx;
-    this.vy[i] = vy;
-    this.vz[i] = vz;
-    this.life[i] = life;
-    this.max[i] = life;
-    this.col[i] = c;
-  }
-
-  clear() {
-    this.n = 0;
-  }
-
-  update(dt: number) {
-    for (let i = 0; i < this.n; i++) {
-      this.life[i] -= dt;
-      if (this.life[i] <= 0) {
-        // Swap the last one into this slot.
-        const j = --this.n;
-        this.x[i] = this.x[j];
-        this.y[i] = this.y[j];
-        this.z[i] = this.z[j];
-        this.vx[i] = this.vx[j];
-        this.vy[i] = this.vy[j];
-        this.vz[i] = this.vz[j];
-        this.life[i] = this.life[j];
-        this.max[i] = this.max[j];
-        this.col[i] = this.col[j];
-        i--;
-        continue;
-      }
-      this.x[i] += this.vx[i] * dt;
-      this.y[i] += this.vy[i] * dt;
-      this.vz[i] -= 380 * dt;
-      this.z[i] += this.vz[i] * dt;
-      if (this.z[i] < 0) {
-        // Sparks bounce and skid on the floor.
-        this.z[i] = 0;
-        this.vz[i] = -this.vz[i] * 0.35;
-        this.vx[i] *= 0.6;
-        this.vy[i] *= 0.6;
-      }
-    }
-  }
-
-  /** Fading ones flicker out on alternate frames: pixel-style, and no alpha changes. */
-  draw(c: CanvasRenderingContext2D, frame: number) {
-    let current = -1;
-    for (let i = 0; i < this.n; i++) {
-      if (this.life[i] < this.max[i] * 0.5 && (i + frame) & 1) continue;
-      if (this.col[i] !== current) {
-        current = this.col[i];
-        c.fillStyle = this.colors[current];
-      }
-      c.fillRect(Math.round(this.x[i]), Math.round(this.y[i] - this.z[i]), 1, 1);
-    }
   }
 }
 
@@ -536,7 +247,8 @@ export class Game {
     private hooks: Hooks,
   ) {
     this.ctx = canvas.getContext('2d')!;
-    this.rooms = [this.paintRoom(0), this.paintRoom(1)];
+    this.rooms = FLOORS.map((f) => f.paint());
+    this.toFloor(0);
     this.resize(1);
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
@@ -603,9 +315,9 @@ export class Game {
   // Back to a floor with nothing in flight. B1 is repainted on the way to
   // the office, so a new run doesn't find the last one's rubble there.
   private toFloor(n: number) {
-    if (n === 0 && this.floor !== 0) this.rooms[1] = this.paintRoom(1);
+    if (n === 0 && this.floor !== 0) this.rooms[this.floor] = FLOORS[this.floor].paint();
     this.floor = n;
-    PROPS = FLOOR_PROPS[n];
+    setProps(FLOORS[n].props);
     this.quake = null;
     this.spit = [];
     this.waves = [];
@@ -698,7 +410,7 @@ export class Game {
   }
 
   private banner(title: string, sub?: string) {
-    this.hooks.banner(title, sub, this.floor === 1);
+    this.hooks.banner(title, sub, FLOORS[this.floor].dark);
   }
 
   private king(): Enemy | undefined {
@@ -1328,7 +1040,7 @@ export class Game {
         tiles.push({ x, y, at: BREAK + d / 240 + rand(0, 0.16), h: 0, v: 0 });
       }
     }
-    const cracks = this.paintCracks(king.x, king.y);
+    const cracks = paintCracks(king.x, king.y);
     const cracked = document.createElement('canvas');
     cracked.width = VIEW_W;
     cracked.height = VIEW_H;
@@ -1349,7 +1061,7 @@ export class Game {
     // Where each lands on B1, clear of the furniture down there.
     const faller = (b: Body): Faller => {
       const at = { ...b };
-      collide(at, true, SERVER_PROPS);
+      collide(at, true, FLOORS[1].props);
       return { h: 0, v: 0, falling: false, landed: false, tx: at.x, ty: at.y };
     };
     this.quake = {
@@ -1359,21 +1071,6 @@ export class Game {
     this.hitstop = 0.15;
     tone(260, 70, 0.9, 0.12, 'sawtooth');
     burst(0.9, 220, 0.4, 'lowpass');
-  }
-
-  /** The tile under a point of the office floor. */
-  private tileAt(q: Quake, x: number, y: number): Tile {
-    const cols = (VIEW_W - SIDE * 2) / TILE_W;
-    const rows = Math.ceil((FRONT - FLOOR_TOP) / TILE_H);
-    const col = clamp(Math.floor((x - SIDE) / TILE_W), 0, cols - 1);
-    const row = clamp(Math.floor((y - FLOOR_TOP) / TILE_H), 0, rows - 1);
-    return q.tiles[row * cols + col];
-  }
-
-  /** How far the cracks have run from the impact, in floor pixels. */
-  private crackReach(q: Quake) {
-    const k = clamp((q.t - SLAM) / (BREAK - SLAM - 0.15), 0, 1);
-    return 330 * (1 - (1 - k) ** 3);
   }
 
   private updateQuake(q: Quake, dt: number) {
@@ -1404,7 +1101,7 @@ export class Game {
       // Cracks racing out: a crackle and a kick of grit where they've reached.
       q.nextFx = t + 0.08;
       burst(0.06, rand(1800, 3200), 0.25);
-      const r = this.crackReach(q);
+      const r = crackReach(q);
       const a = rand(0, Math.PI * 2);
       const x = q.x + Math.cos(a) * r;
       const y = q.y + Math.sin(a) * r * 0.6;
@@ -1463,7 +1160,7 @@ export class Game {
   private fall(q: Quake, f: Faller, b: Body, who: 'king' | 'player', dt: number) {
     if (f.landed) return;
     if (!f.falling) {
-      if (q.t < this.tileAt(q, b.x, b.y).at) return;
+      if (q.t < tileAt(q, b.x, b.y).at) return;
       f.falling = true;
       if (who === 'player') tone(520, 90, 1.3, 0.07, 'sine');
     }
@@ -1505,75 +1202,12 @@ export class Game {
     this.resetDoors();
     this.sparks.clear();
     this.floor = 1;
-    PROPS = SERVER_PROPS;
+    setProps(FLOORS[1].props);
     this.quake = null;
     this.shake(6, 0.6);
     this.banner('B1 · Server room', 'The Root Bug is enraged');
     tone(220, 60, 0.8, 0.12, 'sawtooth');
     burst(0.5, 300, 0.4, 'lowpass');
-  }
-
-  // The crack web from the slam: straight rays that wander and fork, rings
-  // round the impact, a crater in the middle. Same look as the glass.
-  private paintCracks(ix: number, iy: number): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = VIEW_W;
-    c.height = VIEW_H;
-    const g = c.getContext('2d')!;
-    const pts: number[] = [];
-    const inside = (x: number, y: number) => x > SIDE + 1 && x < VIEW_W - SIDE - 2 && y > FLOOR_TOP + 1 && y < FRONT - 2;
-    const seg = (x0: number, y0: number, x1: number, y1: number) => {
-      const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
-      for (let i = 0; i <= n; i++) pts.push(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n));
-    };
-    const ray = (x: number, y: number, a: number, len: number, depth: number) => {
-      for (let walked = 0; walked < len; ) {
-        const step = rand(6, 13);
-        a += rand(-0.35, 0.35);
-        let nx = x + Math.cos(a) * step;
-        let ny = y + Math.sin(a) * step * 0.6; // squashed: the floor's in perspective
-        const out = !inside(nx, ny);
-        if (out) (nx = clamp(nx, SIDE + 2, VIEW_W - SIDE - 3)), (ny = clamp(ny, FLOOR_TOP + 2, FRONT - 3));
-        seg(x, y, nx, ny);
-        if (out) return;
-        [x, y] = [nx, ny];
-        walked += step;
-        if (depth < 2 && Math.random() < 0.16) ray(x, y, a + (Math.random() < 0.5 ? -1 : 1) * rand(0.5, 0.9), (len - walked) * 0.5, depth + 1);
-      }
-    };
-    const n = 11;
-    const angles = Array.from({ length: n }, (_, i) => (i / n) * Math.PI * 2 + rand(-0.2, 0.2));
-    for (const a of angles) ray(ix, iy, a, rand(90, 240), 0);
-    // Rings: chords between neighbouring rays, close in.
-    for (const r of [9, 17, 28]) {
-      for (let i = 0; i < n; i++) {
-        if (Math.random() > 0.65) continue;
-        const a0 = angles[i];
-        const a1 = angles[(i + 1) % n];
-        const r0 = r * rand(0.85, 1.15);
-        const r1 = r * rand(0.85, 1.15);
-        const x0 = ix + Math.cos(a0) * r0;
-        const y0 = iy + Math.sin(a0) * r0 * 0.6;
-        const x1 = ix + Math.cos(a1) * r1;
-        const y1 = iy + Math.sin(a1) * r1 * 0.6;
-        if (inside(x0, y0) && inside(x1, y1)) seg(x0, y0, x1, y1);
-      }
-    }
-    // The crater: crushed tile, darker at the heart.
-    for (let y = -5; y <= 5; y++) {
-      for (let x = -9; x <= 9; x++) {
-        const d = len(x / 9, y / 5) + rand(-0.12, 0.12);
-        if (d > 1 || !inside(ix + x, iy + y)) continue;
-        g.fillStyle = d < 0.45 ? '#7E7A71' : d < 0.75 ? '#A39F95' : '#C4C0B6';
-        g.fillRect(Math.round(ix + x), Math.round(iy + y), 1, 1);
-      }
-    }
-    // A lit lower edge under every crack, then the crack itself.
-    g.fillStyle = '#FBFAF6';
-    for (let i = 0; i < pts.length; i += 2) g.fillRect(pts[i], pts[i + 1] + 1, 1, 1);
-    g.fillStyle = '#5E5A52';
-    for (let i = 0; i < pts.length; i += 2) g.fillRect(pts[i], pts[i + 1], 1, 1);
-    return c;
   }
 
   // Bugs shoulder each other aside instead of stacking up.
@@ -1802,305 +1436,11 @@ export class Game {
     this.hooks.hud(this.lastHud);
   }
 
-  // ── Drawing: the room ──
-  // Painted once: the back wall with its windows and lifts, the floor, the
-  // side walls and the low front wall. Furniture is drawn live, so bodies can
-  // pass behind it.
-  private paintRoom(floor: number): HTMLCanvasElement {
-    return floor === 0 ? this.paintOffice() : this.paintServerRoom();
-  }
-
-  private paintOffice(): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = VIEW_W;
-    c.height = VIEW_H;
-    const g = c.getContext('2d')!;
-    const px = (x: number, y: number, w: number, h: number, col: string) => {
-      g.fillStyle = col;
-      g.fillRect(x, y, w, h);
-    };
-
-    px(0, 0, VIEW_W, VIEW_H, PAL.k);
-
-    // Back wall.
-    px(SIDE, WALL_TOP, VIEW_W - SIDE * 2, FLOOR_TOP - WALL_TOP, WALL);
-    px(SIDE, WALL_TOP, VIEW_W - SIDE * 2, 1, '#3A3A36');
-    const skyline: number[] = [];
-    for (let x = 0; x < VIEW_W; ) {
-      const w = 5 + Math.floor(Math.random() * 12);
-      const h = 4 + Math.floor(Math.random() * 12);
-      for (let k = 0; k < w; k++) skyline.push(h);
-      x += w;
-    }
-    // Windows either side of the lift lobby.
-    for (const [x0, x1] of [[SIDE + 6, 96], [224, VIEW_W - SIDE - 6]]) {
-      const wy = WALL_TOP + 5;
-      const wh = 20;
-      px(x0, wy, x1 - x0, wh, GLASS);
-      for (let x = x0; x < x1; x++) {
-        const h = skyline[x];
-        px(x, wy + wh - h, 1, h, SKYLINE);
-        if (x % 3 === 0 && (x * 7) % 5 === 0) px(x, wy + wh - h + 2, 1, 1, WALL);
-      }
-      for (let x = x0 + 4; x < x1 - 6; x += 19) for (let d = 0; d < 6; d++) px(x + d, wy + 2 + d * 2, 1, 2, 'rgba(255,255,255,0.55)');
-      for (let x = x0; x <= x1; x += 14) px(Math.min(x, x1), wy, 1, wh, MULLION);
-      px(x0, wy, x1 - x0 + 1, 1, MULLION);
-      px(x0, wy + wh, x1 - x0 + 1, 1, MULLION);
-    }
-    // Lift lobby panelling and frames.
-    px(96, WALL_TOP + 1, 128, FLOOR_TOP - WALL_TOP - 1, '#ECEAE4');
-    for (const d of DOORS) {
-      if (d.side !== 'back') continue;
-      px(d.x - 10, FLOOR_TOP - 25, 20, 25, PAL.m);
-      px(d.x - 9, FLOOR_TOP - 24, 18, 24, PAL.k);
-    }
-    // Ceiling lights along the wall head.
-    for (let x = SIDE + 14; x < VIEW_W - SIDE - 14; x += 34) px(x, WALL_TOP + 1, 12, 1, '#FFF4D6');
-    px(SIDE, FLOOR_TOP - 2, VIEW_W - SIDE * 2, 2, '#DAD7CF'); // skirting
-
-    // Floor: big tiles, a rug in the middle.
-    for (let y = FLOOR_TOP; y < FRONT; y += 12) {
-      for (let x = SIDE; x < VIEW_W - SIDE; x += 20) {
-        const odd = ((x - SIDE) / 20 + (y - FLOOR_TOP) / 12) % 2 === 1;
-        px(x, y, 20, 12, odd ? FLOOR_B : FLOOR_A);
-      }
-    }
-    for (let y = FLOOR_TOP; y < FRONT; y += 12) px(SIDE, y, VIEW_W - SIDE * 2, 1, GROUT);
-    for (let x = SIDE; x < VIEW_W - SIDE; x += 20) px(x, FLOOR_TOP, 1, FRONT - FLOOR_TOP, GROUT);
-    px(118, 86, 84, 48, RUG);
-    px(118, 86, 84, 1, '#C9D2CB');
-    px(118, 133, 84, 1, '#C9D2CB');
-    px(121, 89, 78, 1, '#C9D2CB');
-    px(121, 130, 78, 1, '#C9D2CB');
-    // A soft shade along the foot of the back wall.
-    px(SIDE, FLOOR_TOP, VIEW_W - SIDE * 2, 2, 'rgba(17,17,17,0.08)');
-
-    // Side walls, seen from above: their tops, with door openings.
-    px(0, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
-    px(VIEW_W - SIDE, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
-    px(SIDE - 1, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
-    px(VIEW_W - SIDE, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
-    for (const d of DOORS) {
-      if (d.side === 'back') continue;
-      const x = d.side === 'left' ? 0 : VIEW_W - SIDE;
-      px(x, d.y - 12, SIDE, 14, '#2A2A27');
-      px(x, d.y - 13, SIDE, 1, PAL.m);
-      px(x, d.y + 2, SIDE, 1, PAL.m);
-    }
-    // Front wall.
-    px(0, FRONT, VIEW_W, VIEW_H - FRONT, PAL.k);
-    px(SIDE, FRONT, VIEW_W - SIDE * 2, 1, '#3A3A36');
-    return c;
-  }
-
-  // B1: bare concrete block, pipes along the top, freight lifts in hazard
-  // frames, a stencilled B1, and a dark concrete floor with raised-floor
-  // tiles in front of the server racks. Lit by a few pools from above.
-  private paintServerRoom(): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = VIEW_W;
-    c.height = VIEW_H;
-    const g = c.getContext('2d')!;
-    const px = (x: number, y: number, w: number, h: number, col: string) => {
-      g.fillStyle = col;
-      g.fillRect(x, y, w, h);
-    };
-    const hazard = (x: number, y: number, w: number, h: number) => {
-      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) px(x + xx, y + yy, 1, 1, ((xx + yy) >> 2) % 2 ? PAL.k : PAL.y);
-    };
-    // Pools of light: rows of a soft ellipse, a few steps of brightness.
-    const pool = (cx: number, cy: number, rx: number, ry: number, col: string) => {
-      for (let y = -ry; y <= ry; y++) {
-        const half = Math.round(rx * Math.sqrt(1 - (y / ry) ** 2));
-        px(cx - half, cy + y, half * 2, 1, col);
-      }
-    };
-    const inner = VIEW_W - SIDE * 2;
-
-    px(0, 0, VIEW_W, VIEW_H, PAL.k);
-
-    // Back wall: concrete block in stretcher bond.
-    px(SIDE, WALL_TOP, inner, FLOOR_TOP - WALL_TOP, B1_WALL);
-    for (let y = WALL_TOP + 1, row = 0; y < FLOOR_TOP; y += 6, row++) {
-      px(SIDE, y, inner, 1, B1_WALL_D);
-      for (let x = SIDE + (row % 2 ? 7 : 0); x < VIEW_W - SIDE; x += 14) px(x, y, 1, 6, B1_WALL_D);
-    }
-    px(SIDE, WALL_TOP, inner, 1, '#3A3A36');
-    // Pipes along the wall head, on brackets: a grey main and a red sprinkler line.
-    px(SIDE, WALL_TOP + 1, inner, 3, '#5D605B');
-    px(SIDE, WALL_TOP + 1, inner, 1, '#9A9D96');
-    px(SIDE, WALL_TOP + 5, inner, 2, '#8E4A30');
-    px(SIDE, WALL_TOP + 5, inner, 1, '#B5603E');
-    for (let x = SIDE + 12; x < VIEW_W - SIDE; x += 30) px(x, WALL_TOP + 1, 2, 7, '#3A3D39');
-    // B1, stencilled in brass, either side of the lifts.
-    const B1 = ['110010', '101110', '110010', '101010', '110111'];
-    for (const x0 of [30, 262]) {
-      B1.forEach((row, y) => [...row].forEach((ch, x) => ch === '1' && px(x0 + x * 2, WALL_TOP + 13 + y * 2, 2, 2, '#B8913F')));
-    }
-    // Wall vents and a fuse box.
-    for (const [x0, y0] of [[62, 15], [236, 15]]) {
-      px(x0, y0, 18, 12, '#3E413D');
-      for (let y = y0 + 2; y < y0 + 11; y += 2) px(x0 + 1, y, 16, 1, '#2A2C29');
-      px(x0, y0, 18, 1, '#A3A69E');
-    }
-    px(290, 16, 10, 13, '#8C8F88');
-    px(290, 16, 10, 1, '#B4B7AF');
-    px(293, 19, 4, 4, PAL.y);
-    px(294, 20, 2, 2, PAL.k);
-    // Freight lifts in hazard-striped frames.
-    for (const d of DOORS) {
-      if (d.side !== 'back') continue;
-      hazard(d.x - 11, FLOOR_TOP - 27, 22, 27);
-      px(d.x - 9, FLOOR_TOP - 24, 18, 24, PAL.k);
-    }
-    // Caged lamps.
-    for (const x of [44, 136, 184, 276]) {
-      px(x, WALL_TOP + 9, 5, 3, '#FFF4D6');
-      px(x + 2, WALL_TOP + 9, 1, 3, '#3A3D39');
-    }
-    px(SIDE, FLOOR_TOP - 3, inner, 3, '#4A4D49'); // kick plate
-
-    // Floor: poured concrete in big slabs, speckled.
-    px(SIDE, FLOOR_TOP, inner, FRONT - FLOOR_TOP, B1_FLOOR);
-    for (let y = FLOOR_TOP; y < FRONT; y += 34) {
-      for (let x = SIDE; x < VIEW_W - SIDE; x += 50) {
-        if (Math.random() < 0.4) px(x + 1, y + 1, 49, 33, B1_FLOOR_B);
-      }
-    }
-    for (let i = 0; i < 700; i++) {
-      px(SIDE + Math.floor(Math.random() * inner), FLOOR_TOP + Math.floor(Math.random() * (FRONT - FLOOR_TOP)), 1, 1, i % 2 ? '#646862' : '#4C504B');
-    }
-    for (let y = FLOOR_TOP; y < FRONT; y += 34) px(SIDE, y, inner, 1, B1_JOINT);
-    for (let x = SIDE; x < VIEW_W - SIDE; x += 50) px(x, FLOOR_TOP, 1, FRONT - FLOOR_TOP, B1_JOINT);
-    // Light falling from the lamps.
-    pool(160, 112, 78, 34, 'rgba(255,244,214,0.035)');
-    pool(160, 112, 52, 22, 'rgba(255,244,214,0.04)');
-    pool(160, 112, 28, 12, 'rgba(255,244,214,0.04)');
-    // Raised-floor tiles, perforated, in front of the racks.
-    for (const [x0, y0] of [[30, 76], [260, 76], [30, 150], [260, 150]]) {
-      for (let x = x0; x < x0 + 30; x += 10) {
-        px(x, y0, 10, 10, '#8A8E88');
-        px(x, y0, 10, 1, '#9EA29B');
-        px(x, y0, 1, 10, '#777B75');
-        for (let yy = y0 + 2; yy < y0 + 9; yy += 2) for (let xx = x + 2; xx < x + 9; xx += 2) px(xx, yy, 1, 1, '#6A6E68');
-      }
-    }
-    // A walkway line along the back, landing chevrons at the lifts, a drain.
-    px(SIDE, FLOOR_TOP + 13, inner, 1, '#9C7D3C');
-    for (const d of DOORS) if (d.side === 'back') hazard(d.x - 10, FLOOR_TOP + 1, 20, 4);
-    px(152, 168, 16, 6, '#3C3F3B');
-    for (let x = 153; x < 167; x += 2) px(x, 169, 1, 4, '#2A2C29');
-    // Shade at the foot of the wall and down the sides.
-    px(SIDE, FLOOR_TOP, inner, 3, 'rgba(0,0,0,0.18)');
-    px(SIDE, FLOOR_TOP, 12, FRONT - FLOOR_TOP, 'rgba(0,0,0,0.1)');
-    px(VIEW_W - SIDE - 12, FLOOR_TOP, 12, FRONT - FLOOR_TOP, 'rgba(0,0,0,0.1)');
-
-    // Side walls with their doors, and the front wall, as upstairs.
-    px(0, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
-    px(VIEW_W - SIDE, WALL_TOP, SIDE, FRONT - WALL_TOP, PAL.k);
-    px(SIDE - 1, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
-    px(VIEW_W - SIDE, WALL_TOP, 1, FRONT - WALL_TOP, '#3A3A36');
-    for (const d of DOORS) {
-      if (d.side === 'back') continue;
-      const x = d.side === 'left' ? 0 : VIEW_W - SIDE;
-      px(x, d.y - 12, SIDE, 14, '#2A2A27');
-      hazard(x, d.y - 14, SIDE, 2);
-      hazard(x, d.y + 2, SIDE, 2);
-    }
-    px(0, FRONT, VIEW_W, VIEW_H - FRONT, PAL.k);
-    px(SIDE, FRONT, inner, 1, '#3A3A36');
-    return c;
-  }
-
-  private drawProp(p: Prop) {
-    const c = this.ctx;
-    const px = (x: number, y: number, w: number, h: number, col: string) => {
-      c.fillStyle = col;
-      c.fillRect(Math.round(x), Math.round(y), w, h);
-    };
-    const { x, y, w, h, height } = p;
-    // Contact shadow on the floor.
-    px(x - 1, y + h - 1, w + 2, 3, SHADOW);
-    if (p.kind === 'pillar') {
-      px(x, y + h - height, w, height, '#D9D6CE'); // face
-      px(x, y + h - height, w, 2, '#EEECE6');
-      px(x + w - 3, y + h - height, 3, height, '#C9C5BC'); // side
-      px(x, y + h - 2, w, 2, '#BDB9AF'); // base
-      return;
-    }
-    if (p.kind === 'column') {
-      // Bare concrete, a hazard band where forklifts would hit it.
-      px(x, y + h - height, w, height, '#8A8D86');
-      px(x, y + h - height, w, 2, '#A3A69E');
-      px(x + w - 3, y + h - height, 3, height, '#767973');
-      for (let yy = 0; yy < 5; yy++) for (let xx = 0; xx < w; xx++) px(x + xx, y + h - 11 + yy, 1, 1, ((xx + yy) >> 1) % 2 ? PAL.k : PAL.y);
-      px(x, y + h - 2, w, 2, '#5D605B');
-      return;
-    }
-    if (p.kind === 'server') {
-      // A cabinet: its top seen from above, a grilled door with blinking lights.
-      const top = y + h - height - h;
-      px(x, top, w, h, '#3A3D3A');
-      px(x, top, w, 1, '#4E524E');
-      px(x, y + h - height, w, height, '#232624');
-      px(x, y + h - height, w, 1, '#4A4E4A');
-      for (let xx = x + 2; xx < x + w - 6; xx += 2) px(xx, y + h - height + 3, 1, height - 6, '#2E312F');
-      px(x + w / 2 - 1, y + h - height + 3, 1, height - 6, '#151716'); // the doors' seam
-      for (let i = 0; i < 6; i++) {
-        const on = Math.sin(this.time * (2.3 + i * 1.3) + i * 2 + x) > 0;
-        px(x + w - 4, y + h - height + 4 + i * 4, 2, 1, on ? (i % 4 === 0 ? PAL.y : '#7FD39A') : '#1A1C1B');
-      }
-      return;
-    }
-    if (p.kind === 'crate') {
-      const top = y + h - height - h;
-      px(x, top, w, h, '#C9A66B');
-      px(x, top, w, 1, '#DDBE86');
-      px(x, y + h - height, w, height, '#A9844C');
-      px(x, y + h - height, w, 1, '#8C6B3A');
-      px(x, y + h - height + Math.floor(height / 2), w, 1, '#8C6B3A');
-      px(x + 1, top + 1, w - 2, 1, '#B8935A');
-      px(x + 2, y + h - height + 2, 1, height - 3, '#8C6B3A');
-      px(x + w - 3, y + h - height + 2, 1, height - 3, '#8C6B3A');
-      return;
-    }
-    if (p.kind === 'rack') {
-      px(x, y + h - height, w, height, PAL.k);
-      for (let yy = y + h - height + 3; yy < y + h - 2; yy += 3) px(x + 2, yy, w - 4, 1, '#2A2A27');
-      for (let i = 0; i < 6; i++) {
-        const on = Math.sin(this.time * (3 + i * 1.7) + i) > 0.2;
-        px(x + w - 4, y + h - height + 4 + i * 4, 1, 1, on ? (i % 3 === 0 ? PAL.r : '#7FD39A') : '#2A2A27');
-      }
-      return;
-    }
-    if (p.kind === 'desk') {
-      const top = y + h - height - h; // the desktop, seen from above
-      px(x, top, w, h, '#E3E0D8');
-      px(x, top, w, 1, '#F3F1EC');
-      px(x, y + h - height, w, height, '#B9B5AB'); // front panel
-      px(x, y + h - height, w, 1, '#9F9B91');
-      px(x + 2, y + h - 2, 2, 2, PAL.m); // feet
-      px(x + w - 4, y + h - 2, 2, 2, PAL.m);
-      px(x + w / 2 - 6, top - 6, 12, 8, PAL.k); // monitor
-      px(x + w / 2 - 5, top - 5, 10, 5, PAL.g);
-      px(x + w / 2 - 1, top + 2, 2, 1, PAL.k);
-      px(x + 4, top + 4, 7, 2, PAL.m); // keyboard
-      px(x + w - 9, top + 3, 4, 3, '#C9C5BC'); // a mug
-      return;
-    }
-    // Plant.
-    px(x, y - 4, w, 5, PAL.k); // pot
-    px(x + 1, y - 13, 1, 9, PAL.g);
-    px(x + 3, y - 14, 1, 10, PAL.g);
-    px(x + 4, y - 11, 1, 7, PAL.g);
-    px(x, y - 12, 1, 3, PAL.l);
-    px(x + 5, y - 10, 1, 3, PAL.l);
-    px(x + 2, y - 15, 1, 3, PAL.l);
-  }
-
+  // ── Drawing ──
   private drawDoors(floor: number) {
     const c = this.ctx;
-    const steel = floor ? '#8C8F88' : STEEL;
+    const look = FLOORS[floor].doors;
+    const steel = look.steel;
     for (const d of this.doors) {
       const coming = !!d.queue && Math.floor(this.time * 8) % 2 === 0;
       if (d.side === 'back') {
@@ -2108,15 +1448,15 @@ export class Game {
         c.fillStyle = steel;
         c.fillRect(d.x - 8, FLOOR_TOP - 23, half, 23);
         c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, half, 23);
-        if (floor && half > 2) {
+        if (look.ribs && half > 2) {
           // Freight doors: ribbed.
-          c.fillStyle = '#747770';
+          c.fillStyle = look.ribs;
           for (let y = FLOOR_TOP - 20; y < FLOOR_TOP - 2; y += 4) {
             c.fillRect(d.x - 8, y, half, 1);
             c.fillRect(d.x + 8 - half, y, half, 1);
           }
         }
-        c.fillStyle = floor ? '#A3A69E' : STEEL_HI;
+        c.fillStyle = look.edge;
         if (half > 1) {
           c.fillRect(d.x - 8, FLOOR_TOP - 23, 1, 23);
           c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, 1, 23);
@@ -2286,7 +1626,7 @@ export class Game {
       c.drawImage(this.rooms[this.floor], 0, 0);
       if (q && q.t >= SLAM) {
         // The cracks so far: everything within reach of the impact.
-        const r = this.crackReach(q);
+        const r = crackReach(q);
         c.save();
         c.beginPath();
         c.ellipse(q.x, q.y, r + 1, r * 0.6 + 1, 0, 0, Math.PI * 2);
@@ -2339,7 +1679,7 @@ export class Game {
     }
     for (let i = 0; i < n; i++) {
       const it = list[i];
-      if (it.kind === 0) this.drawProp(it.ref as Prop);
+      if (it.kind === 0) drawProp(this.ctx, it.ref as Prop, this.time);
       else if (it.kind === 1) this.drawPickup(it.ref as Pickup);
       else if (it.kind === 2) this.drawEnemy(it.ref as Enemy);
       else this.drawPlayer(it.ref as Player);
@@ -2443,7 +1783,7 @@ export class Game {
       for (const [f, b] of [[q.boss, k], [q.player, p]] as const) {
         if (f.falling) this.shadow(b.x, b.y, b.r * (0.4 + (0.6 * f.h) / DEPTH));
       }
-      const things: { y: number; draw: () => void }[] = SERVER_PROPS.map((pr) => ({ y: pr.y + pr.h, draw: () => this.drawProp(pr) }));
+      const things: { y: number; draw: () => void }[] = FLOORS[1].props.map((pr) => ({ y: pr.y + pr.h, draw: () => drawProp(this.ctx, pr, this.time) }));
       if (q.boss.landed) things.push({ y: k.y, draw: () => this.drawEnemy(k) });
       if (q.player.landed) things.push({ y: p.y, draw: () => this.drawPlayer(p) });
       things.sort((a, b) => a.y - b.y).forEach((t) => t.draw());
@@ -2457,7 +1797,7 @@ export class Game {
     c.drawImage(office, 0, 0, VIEW_W, FLOOR_TOP, 0, 0, VIEW_W, FLOOR_TOP);
     this.drawDoors(0);
 
-    const fallen = (x: number, y: number) => this.tileAt(q, x, y).h;
+    const fallen = (x: number, y: number) => tileAt(q, x, y).h;
     // Whatever has gone, deepest first: smaller and darker the further down.
     const gone = q.tiles.filter((t) => t.h > 0 && t.h < 160).sort((a, b) => b.h - a.h);
     for (const t of gone) {
@@ -2484,7 +1824,7 @@ export class Game {
     };
     for (const pr of PROPS) {
       const h = fallen(pr.x + pr.w / 2, pr.y + pr.h / 2);
-      if (h > 0) sinking(pr.y + pr.h, h, () => this.drawProp(pr), pr.x + pr.w / 2);
+      if (h > 0) sinking(pr.y + pr.h, h, () => drawProp(this.ctx, pr, this.time), pr.x + pr.w / 2);
     }
     for (const e of this.enemies) {
       const h = fallen(e.x, e.y);
@@ -2512,7 +1852,7 @@ export class Game {
       c.drawImage(q.cracked, t.x, t.y, TILE_W, th, t.x + jx, t.y, TILE_W, th);
     }
     const standing: { y: number; draw: () => void }[] = [];
-    for (const pr of PROPS) if (fallen(pr.x + pr.w / 2, pr.y + pr.h / 2) === 0) standing.push({ y: pr.y + pr.h, draw: () => this.drawProp(pr) });
+    for (const pr of PROPS) if (fallen(pr.x + pr.w / 2, pr.y + pr.h / 2) === 0) standing.push({ y: pr.y + pr.h, draw: () => drawProp(this.ctx, pr, this.time) });
     for (const e of this.enemies) if (e !== k && fallen(e.x, e.y) === 0) standing.push({ y: e.y, draw: () => this.drawEnemy(e) });
     if (!q.boss.falling) standing.push({ y: k.y, draw: () => this.drawEnemy(k) });
     if (!q.player.falling) standing.push({ y: p.y, draw: () => this.drawPlayer(p) });
