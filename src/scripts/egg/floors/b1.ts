@@ -182,6 +182,8 @@ const draw: Record<'column' | 'server' | 'crate', PropDraw> = {
 };
 
 export const b1: Floor = {
+  name: 'B1',
+  title: 'B1 · Server room',
   props: SERVER_PROPS,
   paint: paintServerRoom,
   draw,

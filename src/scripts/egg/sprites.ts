@@ -204,7 +204,7 @@ export function buildSprites() {
 
 export type Sprites = ReturnType<typeof buildSprites>;
 
-// ── 3×5 digits for score pop-ups ──
+// ── 3×5 digits for score pop-ups and the HUD ──
 const GLYPHS: Record<string, string> = {
   '0': '111101101101111',
   '1': '010110010010111',
@@ -221,6 +221,9 @@ const GLYPHS: Record<string, string> = {
   '-': '000000111000000',
   ':': '000010000010000',
   '.': '000000000000010',
+  B: '110101110101110', // for floor names: 10F, G, B1
+  F: '111100110100100',
+  G: '111100101101111',
 };
 
 /**

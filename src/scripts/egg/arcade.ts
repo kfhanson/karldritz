@@ -42,6 +42,7 @@ const TEMPLATE = `
     <header class="ea-top">
       <p class="ea-kicker"><span class="ea-dot"></span>Hidden level</p>
       <dl class="ea-hud" aria-live="off">
+        <div class="ea-floor"><dt>Floor</dt><dd data-floor>--</dd></div>
         <div><dt>Round</dt><dd data-round>--</dd></div>
         <div><dt>Score</dt><dd data-score>00000</dd></div>
         <div class="ea-time"><dt>Time</dt><dd data-time>0:00</dd></div>
@@ -67,7 +68,7 @@ const TEMPLATE = `
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
           <h3>Hold the floor.</h3>
-          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 20 to win.</p>
+          <p class="ea-copy">Fight your way down from 10F, a floor a round, as bugs pour in through the lifts and side doors. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 20 to win.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
             <button type="button" data-help>How to play</button>
@@ -282,6 +283,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     const idle = game.mode === 'attract';
     const round = idle ? '--' : pad(h.round, 2);
     pixel('[data-round]', round, round);
+    const floor = idle ? '--' : h.floor;
+    pixel('[data-floor]', floor, floor);
     pixel('[data-score]', pad(h.score, 5), String(h.score));
     const t = clock(h.time);
     pixel('[data-time]', t, t);
@@ -328,7 +331,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   function gameOver(r: RunResult) {
     pending = r.score > 0 ? r : null;
     $('[data-over-kicker]').textContent = r.won ? 'You won' : r.record ? 'New best' : 'Game over';
-    $('[data-over-title]').textContent = r.won ? 'B1 is clear.' : `Fell on round ${r.round}.`;
+    $('[data-over-title]').textContent = r.won ? 'B1 is clear.' : `Fell on ${r.floor === 'G' ? 'the ground floor' : r.floor}, round ${r.round}.`;
     $('[data-over-copy]').textContent = `Score ${r.score.toLocaleString()} in ${clock(r.time, true)} · best ${r.best.toLocaleString()}`;
     nameForm.hidden = !pending;
     nameInput.value = lastName();

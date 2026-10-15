@@ -1,15 +1,18 @@
-// The floors of the building, top down. Each brings its own room, its
+// The floors of the building, top down: the office tower from 10F to the
+// ground floor, a round on each, then B1. Each brings its own room, its
 // furniture and how that furniture is drawn; the game, the doors and the bugs
-// are the same on all of them. A new floor is a new file and a line below.
+// are the same on all of them.
 import { SHADOW, type Prop, type PropKind } from '../world';
 import { b1 } from './b1';
-import { office } from './office';
+import { OFFICES } from './office';
 
 /** Paints one pixel-aligned rectangle. */
 export type Px = (x: number, y: number, w: number, h: number, col: string) => void;
 export type PropDraw = (px: Px, p: Prop, time: number) => void;
 
 export interface Floor {
+  name: string; // short, for the HUD: 10F, G, B1
+  title: string; // for the banner
   props: Prop[];
   /** Paints the room once: walls, floor and doorways. */
   paint: () => HTMLCanvasElement;
@@ -20,7 +23,9 @@ export interface Floor {
   doors: { steel: string; edge: string; ribs?: string };
 }
 
-export const FLOORS: Floor[] = [office, b1];
+export const FLOORS: Floor[] = [...OFFICES, b1];
+/** The basement, where the Root Bug's quake drops the fight. */
+export const B1 = FLOORS.length - 1;
 
 // Any floor's furniture can be on screen during the fall between floors.
 const DRAW = Object.assign({}, ...FLOORS.map((f) => f.draw)) as Record<PropKind, PropDraw>;

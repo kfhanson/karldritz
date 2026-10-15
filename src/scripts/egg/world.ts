@@ -12,7 +12,9 @@ export const ARENA = { x0: SIDE + 2, x1: VIEW_W - SIDE - 2, y0: FLOOR_TOP + 4, y
 
 export const SHADOW = 'rgba(17,17,17,0.16)';
 
-export type PropKind = 'desk' | 'pillar' | 'plant' | 'rack' | 'server' | 'column' | 'crate';
+export type PropKind =
+  | 'desk' | 'pillar' | 'plant' | 'rack' | 'table' | 'sofa' | 'cabinet' | 'vending' | 'cooler' | 'copier' | 'reception' | 'bench'
+  | 'server' | 'column' | 'crate';
 export interface Prop {
   kind: PropKind;
   x: number; // footprint on the floor

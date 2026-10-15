@@ -604,7 +604,8 @@
 }
 
 @media (max-width: 640px) {
-  .ea-hud .ea-best {
+  .ea-hud .ea-best,
+  .ea-hud .ea-floor {
     display: none;
   }
   .ea-chip[data-mute] {

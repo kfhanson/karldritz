@@ -18,7 +18,7 @@
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
 import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW } from './people';
-import { drawProp, FLOORS } from './floors';
+import { B1, drawProp, FLOORS } from './floors';
 import { BREAK, crackReach, DEPTH, FALL_G, paintCracks, SLAM, TILE_H, TILE_W, tileAt, type Faller, type Quake, type Rubble, type Tile } from './quake';
 import {
   ARENA, blocked, clamp, collide, DOORS, FLOOR_TOP, FRONT, len, PROPS, prune, rand, setProps, SHADOW, SIDE, Sparks, stopsShot,
@@ -36,8 +36,18 @@ const spreading = (w: { r: number; max: number }) => w.r < w.max;
 // The headings a bug tries, nearest first, to get round furniture.
 const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
 
-const KING_ROUND = 10;
+const KING_ROUND = 10; // on the ground floor
 const DAEMON_ROUND = 20; // the last round: beat its boss to win the run
+
+// The run starts on 10F and goes down a floor a round, to the ground floor
+// for round 10; the Root Bug's quake takes it on down to B1.
+const floorFor = (round: number) => (round <= KING_ROUND ? round - 1 : B1);
+
+// The lift down between floors, as one timeline (seconds): its doors close
+// over the view, the floor counts down, and they open on the next one.
+const SHUT = 0.45;
+const OPEN = 1.15;
+const RIDE = 1.6;
 
 // How dangerous a round's bugs are: tougher, quicker, more of them at once,
 // and more flyers and brutes. It climbs twice as fast as the rounds, so a
@@ -168,6 +178,7 @@ interface Door {
 
 export interface Hud {
   round: number;
+  floor: string; // 10F … G, B1
   score: number;
   best: number;
   hp: number;
@@ -186,6 +197,7 @@ export interface RunResult {
   best: number;
   record: boolean;
   won: boolean; // beat the Daemon
+  floor: string; // where it ended: 10F … G, B1
   time: number; // seconds of play: pauses and the lifts' menus don't count
 }
 
@@ -241,8 +253,8 @@ export class Game {
   private sprites: Sprites = buildSprites();
   private person = buildPerson();
   private guns = buildGuns();
-  private floor = 0; // 0 the office, 1 B1
-  private rooms: HTMLCanvasElement[];
+  private floor = 0; // index into FLOORS: 10F first, B1 last
+  private rooms: (HTMLCanvasElement | undefined)[] = []; // painted when first needed
   private raf = 0;
   private last = 0;
   private acc = 0;
@@ -262,6 +274,7 @@ export class Game {
   private waves: Wave[] = [];
   private beam: Beam | null = null;
   private quake: Quake | null = null;
+  private descent: { t: number; from: number; swapped: boolean } | null = null; // the lift down a floor
   private barLag = 1; // the boss bar's trailing chunk, as a fraction
   // Scratch vectors for the bugs' steering, which runs for every bug every
   // tick. Each is read straight after it's written, never kept.
@@ -303,7 +316,6 @@ export class Game {
     private hooks: Hooks,
   ) {
     this.ctx = canvas.getContext('2d')!;
-    this.rooms = FLOORS.map((f) => f.paint());
     this.toFloor(0);
     this.resize(1);
     this.last = performance.now();
@@ -369,17 +381,22 @@ export class Game {
     this.toFloor(0);
   }
 
-  // Back to a floor with nothing in flight. B1 is repainted on the way to
-  // the office, so a new run doesn't find the last one's rubble there.
+  // Onto a floor with nothing in flight. B1 is repainted on the way back up,
+  // so a new run doesn't find the last one's rubble there.
   private toFloor(n: number) {
-    if (n === 0 && this.floor !== 0) this.rooms[this.floor] = FLOORS[this.floor].paint();
+    if (n !== B1 && this.floor === B1) this.rooms[B1] = undefined;
     this.floor = n;
     setProps(FLOORS[n].props);
     this.quake = null;
+    this.descent = null;
     this.spit = [];
     this.waves = [];
     this.beam = null;
     this.lower.clear();
+  }
+
+  private room(n: number) {
+    return (this.rooms[n] ??= FLOORS[n].paint());
   }
 
   destroy() {
@@ -449,6 +466,13 @@ export class Game {
       this.pushHud();
       return;
     }
+    if (this.descent) {
+      // So is the ride down.
+      this.updateDescent(this.descent, dt);
+      this.updateFx(dt);
+      this.pushHud();
+      return;
+    }
 
     if (this.mode === 'play') this.updateRound(dt);
     else this.updateAttract(dt);
@@ -500,7 +524,9 @@ export class Game {
       : r === KING_ROUND ? 'The floor is shaking'
       : boss ? 'Something big is riding the lift'
       : `${this.toSpawn.length} bugs inbound`;
-    this.banner(`Round ${r}`, sub);
+    // Up in the tower the floor is the headline; down in B1, the round.
+    if (r <= KING_ROUND) this.banner(FLOORS[this.floor].title, `Round ${r} · ${sub}`);
+    else this.banner(`Round ${r}`, sub);
     [523, 659, 784].forEach((f, i) => tone(f, f, 0.12, 0.08, 'square', i * 0.11));
   }
 
@@ -563,7 +589,10 @@ export class Game {
           this.banner(`Round ${this.round} cleared`, healed ? '+1 heart' : 'Full health');
         }
       }
-    } else if (this.phase === 'clear' && this.phaseT <= 0) this.startRound(this.round + 1);
+    } else if (this.phase === 'clear' && this.phaseT <= 0) {
+      if (floorFor(this.round + 1) !== this.floor) this.startDescent();
+      else this.startRound(this.round + 1);
+    }
     else if (this.phase === 'lifts') {
       // Walk into an open lift to take it.
       const back = this.back;
@@ -597,6 +626,78 @@ export class Game {
         this.startRound(this.round + 1);
       }
     }
+  }
+
+  // ── Down a floor ──
+  private startDescent() {
+    this.descent = { t: 0, from: this.floor, swapped: false };
+    this.held.clear();
+    const p = this.player!;
+    p.vx = p.vy = p.dash = 0;
+    tone(1175, 1175, 0.15, 0.05, 'sine');
+  }
+
+  private updateDescent(d: { t: number; from: number; swapped: boolean }, dt: number) {
+    d.t += dt;
+    if (!d.swapped && d.t >= SHUT) {
+      // Shut: out of sight, everything moves down a floor. Coins still on
+      // the floor are banked; the player steps out of the middle lift.
+      d.swapped = true;
+      tone(150, 90, 0.12, 0.08, 'triangle');
+      for (const k of this.pickups) if (k.kind === 'chip') this.chips += k.value;
+      this.pickups = [];
+      this.bullets = [];
+      this.pops = [];
+      this.sparks.clear();
+      this.resetDoors();
+      this.toFloor(floorFor(this.round + 1));
+      this.descent = d; // toFloor ends any ride; this one isn't over
+      const p = this.player!;
+      const lift = this.back[1];
+      Object.assign(p, { x: lift.x, y: ARENA.y0 + 8, vx: 0, vy: 0, lx: 0, ly: 1, inv: 1, cool: 0.3 });
+      lift.open = 1;
+      lift.hold = RIDE - OPEN + 0.5;
+    }
+    if (d.t - dt < OPEN && d.t >= OPEN) tone(1175, 1175, 0.12, 0.05, 'sine');
+    if (d.t >= RIDE) {
+      this.descent = null;
+      this.dashPressed = false;
+      this.startRound(this.round + 1);
+    }
+  }
+
+  // The lift's doors across the view, and between them the floor counting down.
+  private drawDescent(d: { t: number; from: number }) {
+    const c = this.ctx;
+    const ease = (k: number) => 1 - (1 - clamp(k, 0, 1)) ** 3;
+    const k = d.t < SHUT ? ease(d.t / SHUT) : d.t < OPEN ? 1 : 1 - ease((d.t - OPEN) / (RIDE - OPEN));
+    const w = Math.round((VIEW_W / 2) * k);
+    if (w <= 0) return;
+    for (const [x0, edge] of [[0, w - 1], [VIEW_W - w, VIEW_W - w]]) {
+      c.fillStyle = '#BDBBB3';
+      c.fillRect(x0, 0, w, VIEW_H);
+      c.fillStyle = '#B1AFA7';
+      for (let x = x0 + 3; x < x0 + w; x += 6) c.fillRect(x, 0, 1, VIEW_H);
+      c.fillStyle = '#8E8C85';
+      c.fillRect(edge, 0, 1, VIEW_H);
+    }
+    if (k < 1) return;
+    // The indicator: an arrow and the floor, old then new.
+    const name = FLOORS[d.t < SHUT + 0.3 ? d.from : this.floor].name;
+    const x = VIEW_W / 2;
+    const y = 78;
+    c.fillStyle = PAL.k;
+    c.fillRect(x - 22, y - 4, 44, 20);
+    c.fillStyle = '#3A3A36';
+    c.fillRect(x - 22, y - 4, 44, 1);
+    c.fillStyle = PAL.y;
+    const blink = Math.floor(d.t * 6) % 2;
+    for (let i = 0; i < 4; i++) c.fillRect(x - 15 + i, y + 2 + i + blink, 7 - i * 2, 1);
+    c.save();
+    c.translate(x + 6, y + 1);
+    c.scale(2, 2);
+    drawText(c, name, 0, 0, PAL.y);
+    c.restore();
   }
 
   // ── Lifts: what the arcade calls while an offer is open ──
@@ -644,6 +745,12 @@ export class Game {
   finishOffer() {
     if (this.mode !== 'offer') return;
     const p = this.player!;
+    // Up in the tower, the lift goes down a floor while the menu is up.
+    if (floorFor(this.round + 1) !== this.floor) {
+      for (const k of this.pickups) if (k.kind === 'chip') this.chips += k.value;
+      this.pickups = [];
+      this.toFloor(floorFor(this.round + 1));
+    }
     const d = this.back[this.ride];
     p.x = d.x;
     p.y = ARENA.y0 + 8;
@@ -890,7 +997,7 @@ export class Game {
     }
     this.mode = 'over';
     this.player = null;
-    this.hooks.over({ score: this.score, round: this.round, best: this.best, record, won, time: this.ticks / 60 });
+    this.hooks.over({ score: this.score, round: this.round, best: this.best, record, won, floor: FLOORS[this.floor].name, time: this.ticks / 60 });
   }
 
   // ── Bugs ──
@@ -1286,12 +1393,13 @@ export class Game {
         tiles.push({ x, y, at: BREAK + d / 240 + rand(0, 0.16), h: 0, v: 0 });
       }
     }
+    this.room(B1); // painted now, not mid-fall
     const cracks = paintCracks(king.x, king.y);
     const cracked = document.createElement('canvas');
     cracked.width = VIEW_W;
     cracked.height = VIEW_H;
     const g = cracked.getContext('2d')!;
-    g.drawImage(this.rooms[0], 0, 0);
+    g.drawImage(this.room(this.floor), 0, 0);
     g.drawImage(cracks, 0, 0);
 
     const p = this.player!;
@@ -1307,7 +1415,7 @@ export class Game {
     // Where each lands on B1, clear of the furniture down there.
     const faller = (b: Body): Faller => {
       const at = { ...b };
-      collide(at, true, FLOORS[1].props);
+      collide(at, true, FLOORS[B1].props);
       return { h: 0, v: 0, falling: false, landed: false, tx: at.x, ty: at.y };
     };
     this.quake = {
@@ -1377,7 +1485,7 @@ export class Game {
     }
 
     // Rubble falls a little slower than the bodies, so the camera overtakes it.
-    const floor = this.rooms[1].getContext('2d')!;
+    const floor = this.room(B1).getContext('2d')!;
     for (const r of q.rubble) {
       r.v += FALL_G * 0.62 * dt;
       r.h += r.v * dt;
@@ -1447,11 +1555,11 @@ export class Game {
     this.dashPressed = false;
     this.resetDoors();
     this.sparks.clear();
-    this.floor = 1;
-    setProps(FLOORS[1].props);
+    this.floor = B1;
+    setProps(FLOORS[B1].props);
     this.quake = null;
     this.shake(6, 0.6);
-    this.banner('B1 · Server room', 'The Root Bug is enraged');
+    this.banner(FLOORS[B1].title, 'The Root Bug is enraged');
     tone(220, 60, 0.8, 0.12, 'sawtooth');
     burst(0.5, 300, 0.4, 'lowpass');
   }
@@ -1491,7 +1599,7 @@ export class Game {
     burst(0.05, 3000, 0.2);
     if (this.quake) return;
     // Half its health gone in the office: it takes the floor out.
-    if (e.kind === 'king' && !e.rage && this.floor === 0 && e.hp <= e.max / 2) {
+    if (e.kind === 'king' && !e.rage && this.floor !== B1 && e.hp <= e.max / 2) {
       e.hp = Math.ceil(e.max / 2);
       this.startQuake(e);
       return;
@@ -1706,7 +1814,7 @@ export class Game {
     const l = this.loadout;
     const time = Math.floor(this.ticks / 60);
     if (
-      last && last.round === this.round && last.score === this.score && last.best === best && last.hp === hp && last.time === time &&
+      last && last.round === this.round && last.floor === FLOORS[this.floor].name && last.score === this.score && last.best === best && last.hp === hp && last.time === time &&
       last.maxHp === l.maxHp && last.chips === this.chips && last.weaponId === l.weapon && last.mult === mult && last.rapid === rapid
     ) return;
     // At most ten updates a second, except when health or the round changes.
@@ -1714,7 +1822,7 @@ export class Game {
     if (last && now - this.hudAt < 100 && hp === last.hp && this.round === last.round) return;
     this.hudAt = now;
     this.lastHud = {
-      round: this.round, score: this.score, best, hp, maxHp: l.maxHp, chips: this.chips,
+      round: this.round, floor: FLOORS[this.floor].name, score: this.score, best, hp, maxHp: l.maxHp, chips: this.chips,
       weapon: WEAPONS[l.weapon].name, weaponId: l.weapon, mult, rapid, time,
     };
     this.hooks.hud(this.lastHud);
@@ -1925,7 +2033,7 @@ export class Game {
     const q = this.quake;
     if (q && q.t >= BREAK) this.renderFall(q);
     else {
-      c.drawImage(this.rooms[this.floor], 0, 0);
+      c.drawImage(this.room(this.floor), 0, 0);
       if (q && q.t >= SLAM) {
         // The cracks so far: everything within reach of the impact.
         const r = crackReach(q);
@@ -1940,6 +2048,7 @@ export class Game {
       this.drawScene();
     }
     c.restore();
+    if (this.descent) this.drawDescent(this.descent);
     this.drawBossBar();
   }
 
@@ -2107,7 +2216,7 @@ export class Game {
     const cam = Math.round(q.cam);
     const p = this.player!;
     const k = q.king;
-    const office = this.rooms[0];
+    const office = this.room(this.floor);
 
     // The gap between the floors: dark streaks rushing past, faster than
     // the camera, behind everything.
@@ -2125,13 +2234,13 @@ export class Game {
     if (below < VIEW_H) {
       c.save();
       c.translate(0, below);
-      c.drawImage(this.rooms[1], 0, 0);
-      this.drawDoors(1);
+      c.drawImage(this.room(B1), 0, 0);
+      this.drawDoors(B1);
       // Where the falling will land, a shadow that grows as they get close.
       for (const [f, b] of [[q.boss, k], [q.player, p]] as const) {
         if (f.falling) this.shadow(b.x, b.y, b.r * (0.4 + (0.6 * f.h) / DEPTH));
       }
-      const things: { y: number; draw: () => void }[] = FLOORS[1].props.map((pr) => ({ y: pr.y + pr.h, draw: () => drawProp(this.ctx, pr, this.time) }));
+      const things: { y: number; draw: () => void }[] = FLOORS[B1].props.map((pr) => ({ y: pr.y + pr.h, draw: () => drawProp(this.ctx, pr, this.time) }));
       if (q.boss.landed) things.push({ y: k.y, draw: () => this.drawEnemy(k) });
       if (q.player.landed) things.push({ y: p.y, draw: () => this.drawPlayer(p) });
       things.sort((a, b) => a.y - b.y).forEach((t) => t.draw());
@@ -2143,7 +2252,7 @@ export class Game {
     c.save();
     c.translate(0, -cam);
     c.drawImage(office, 0, 0, VIEW_W, FLOOR_TOP, 0, 0, VIEW_W, FLOOR_TOP);
-    this.drawDoors(0);
+    this.drawDoors(this.floor);
 
     const fallen = (x: number, y: number) => tileAt(q, x, y).h;
     // Whatever has gone, deepest first: smaller and darker the further down.
