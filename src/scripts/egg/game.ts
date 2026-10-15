@@ -1865,15 +1865,21 @@ export class Game {
     const reach = REACH - (p.kick / 0.08) * 1.5;
     // Aiming down the room, the gun goes to the hip rather than over the body.
     const hx = won ? p.x + 5 : p.x + aim.x * reach + side * (aim.y > 0 ? 4 : 2) * (1 - Math.abs(aim.x));
-    const hy = won ? cy - 6 : cy + aim.y * reach * 0.7;
+    // In profile the near arm reaches out to the gun hand, a pixel lower.
+    const profile = !won && view === 'e';
+    const hy = won ? cy - 6 : cy + aim.y * reach * 0.7 + (profile ? 1 : 0);
     const k = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * GUN_ANGLES) + GUN_ANGLES) % GUN_ANGLES;
     const swing = moving ? [0, 1, 0, -1][step] : 0;
-    const ox = gun.fore ? hx + aim.x * gun.fore : p.x - side * 5;
-    const oy = gun.fore ? hy + aim.y * gun.fore * 0.7 : cy + 2 + swing;
+    // The other hand: on a long gun's fore-grip; in profile, under the gun
+    // hand in a two-handed grip; otherwise at the side.
+    const cup = profile && !gun.fore;
+    const ox = gun.fore ? hx + aim.x * gun.fore : cup ? hx - aim.x * 2 : p.x - side * 5;
+    const oy = gun.fore ? hy + aim.y * gun.fore * 0.7 : cup ? hy + 1 : cy + 2 + swing;
     const hands = () => {
+      if (cup) this.fist(ox, oy);
       c.drawImage(gun.frames[k], Math.round(hx - gun.half), Math.round(hy - gun.half));
       this.fist(hx, hy);
-      this.fist(ox, oy);
+      if (!cup) this.fist(ox, oy);
       // Muzzle flash on the frame of a shot.
       if (p.kick > 0.05) {
         const mx = Math.round(hx + aim.x * (gun.muzzle + 1.5));

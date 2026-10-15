@@ -124,11 +124,11 @@ const BLINK: Partial<Record<View, [number, string][]>> = {
   e: [[4, '.bbbbssssss.'], [5, '.bbbbssskss.']],
 };
 // Short sleeves ('w', a shade off the shirt) hang at the sides, ending where
-// the free hand rests; in profile the near arm runs down the middle.
+// the free hand rests; in profile the near arm reaches forward to the gun hand.
 const TORSO: Record<View, string[]> = {
   s: ['...hhsshh...', '.whhhrrhhhw.', '.whhhrrhhhw.', '.wkhlrrhwkw.', '..khyrrhwk..', '..hwhhhhwh..', '..kkkykkkk..', '..nnnnnnnn..'],
   se: ['...hhsshh...', '.whhhhrrhhw.', '.whhhhrrhhw.', '.wkhlhrrwkw.', '..khyhrrwk..', '..hwhhhhwh..', '..kkkkykkk..', '..nnnnnnnn..'],
-  e: ['...bhsshh...', '...hhhhrh...', '...hwwhrh...', '...hwwhwh...', '...hkkhwh...', '...hhhhwh...', '...kkkkyk...', '...nnnnnn...'],
+  e: ['...bhsshh...', '...hhhhrh...', '...hhhwss...', '...wkkkSS...', '...hhhhrh...', '...hhhhwh...', '...kkkkyk...', '...nnnnnn...'],
   ne: ['...hhhhhh...', '.whhhhhhhhw.', '.whhhhhhwhw.', '.wkhhhhhwkw.', '..khhhhhwk..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
   n: ['...hhhhhh...', '.whhhhhhhhw.', '.whhhhhhhhw.', '.wkwhhhhwkw.', '..kwhhhhwk..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
 };
