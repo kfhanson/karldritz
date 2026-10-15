@@ -2,8 +2,9 @@
 // view; bugs come in through the lifts in the back wall and the side doors,
 // round after round, each round bigger and every fifth with a boss. Round
 // 25's boss, the Root Bug, smashes the floor at half health and the fight
-// drops to B1, the server room below, where the run carries on. Move with
-// WASD, aim at the cursor, dash out of trouble.
+// drops to B1, the server room below, where the run carries on until round
+// 50's boss, the Daemon: beat it and the run is won. Move with WASD, aim at
+// the cursor, dash out of trouble.
 //
 // The world is the floor plane in pixels; things with height (flyers, bullets,
 // sparks) carry a z and are drawn that far up the screen, with a shadow on
@@ -36,6 +37,7 @@ const spreading = (w: { r: number; max: number }) => w.r < w.max;
 const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
 
 const KING_ROUND = 25;
+const DAEMON_ROUND = 50; // the last round: beat its boss to win the run
 
 const STEP = 1 / 60;
 const SPEED = 80;
@@ -46,7 +48,10 @@ const BULLET = 300;
 const GUN_Z = PERSON_SHOULDER; // shots fly at shoulder height
 const REACH = 4; // how far the gun hand is from the shoulder
 
-export type Kind = 'crawler' | 'flyer' | 'brute' | 'boss' | 'king';
+export type Kind = 'crawler' | 'flyer' | 'brute' | 'boss' | 'king' | 'daemon';
+
+// The big ones: they come by lift, shrug off knockback and drop a heart.
+const big = (k: Kind) => k === 'boss' || k === 'king' || k === 'daemon';
 
 interface Player extends Body {
   lx: number; // where it's looking (unit vector): aim, or the way it last moved
@@ -80,19 +85,39 @@ export interface Enemy extends Body {
   next: number;
   life: number; // attract mode only: wanders off after this long
   max: number; // starting hp, for the boss bar
-  move: Move; // the king's attack being wound up
-  rage: boolean; // the king, after the fall
+  move: Move; // a boss's attack being wound up
+  rage: boolean; // the king after the fall; the Daemon overclocked
+  volley: number; // the Daemon: rings of packets still to fire
 }
 
-export type Move = 'none' | 'charge' | 'slam' | 'spit' | 'summon';
+export type Move = 'none' | 'charge' | 'slam' | 'spit' | 'summon' | 'beam' | 'packets' | 'blink' | 'fork';
 
-/** The king's acid: slow shots that hurt the player. */
+// How long a boss winds up each move (quicker when enraged or overclocked).
+const WIND: Record<Move, number> = { none: 0, charge: 0.6, slam: 0.8, spit: 0.5, summon: 0.6, beam: 1, packets: 0.55, blink: 0.45, fork: 0.6 };
+
+/** The king's acid and the Daemon's packets: slow shots that hurt the player. */
 interface Spit {
   x: number;
   y: number;
   vx: number;
   vy: number;
   life: number;
+  packet: boolean;
+}
+
+/**
+ * The Daemon's beam. Aimed while it warms up (drawn as a flickering dotted
+ * line), then on for a moment. Furniture that stops shots stops it too, so
+ * the server racks are cover; a dash goes through it.
+ */
+interface Beam {
+  src: Enemy;
+  a: number; // heading across the floor
+  on: boolean;
+  t: number; // time left on
+  hit: boolean; // it has already hurt the player
+  ex: number; // where it ends, this tick
+  ey: number;
 }
 
 /** A shockwave from a slam: a ring along the floor. Dash through it. */
@@ -146,13 +171,23 @@ export interface Hud {
   chips: number;
   weapon: string;
   weaponId: string;
+  time: number; // whole seconds
+}
+
+export interface RunResult {
+  score: number;
+  round: number;
+  best: number;
+  record: boolean;
+  won: boolean; // beat the Daemon
+  time: number; // seconds of play: pauses and the lifts' menus don't count
 }
 
 export interface Hooks {
   hud(h: Hud): void;
   /** `dark`: the floor behind it is dark (B1), so the text should be light. */
   banner(title: string, sub?: string, dark?: boolean): void;
-  over(result: { score: number; round: number; best: number; record: boolean }): void;
+  over(result: RunResult): void;
   /** The player stepped into a lift: show its choices; call finishOffer() when done. */
   offer(o: Offer): void;
 }
@@ -170,7 +205,20 @@ const STATS: Record<Kind, { r: number; score: number }> = {
   brute: { r: 7, score: 50 },
   boss: { r: 13, score: 400 },
   king: { r: 16, score: 1500 },
+  daemon: { r: 12, score: 5000 },
 };
+
+// One of a boss's moves, by weight, for a roll in [0, 1).
+function weighted(moves: [Move, number][], roll: number): Move {
+  const total = moves.reduce((a, m) => a + m[1], 0);
+  let acc = 0;
+  return moves.find((m) => (acc += m[1] / total) >= roll)?.[0] ?? moves[0][0];
+}
+
+// Turn heading a toward b by at most `max` radians.
+function turn(a: number, b: number, max: number) {
+  return a + clamp(Math.atan2(Math.sin(b - a), Math.cos(b - a)), -max, max);
+}
 
 function loadBest(): number {
   try {
@@ -206,6 +254,7 @@ export class Game {
   private lower = new Sparks(); // dust on B1 while the camera is still between floors
   private spit: Spit[] = [];
   private waves: Wave[] = [];
+  private beam: Beam | null = null;
   private quake: Quake | null = null;
   private barLag = 1; // the boss bar's trailing chunk, as a fraction
   // Scratch vectors for the bugs' steering, which runs for every bug every
@@ -222,7 +271,8 @@ export class Game {
   private back = this.doors.filter((d) => d.side === 'back'); // the lifts, left to right
 
   private round = 0;
-  private phase: 'intro' | 'fight' | 'clear' | 'lifts' | 'riding' | 'arriving' = 'intro';
+  private phase: 'intro' | 'fight' | 'clear' | 'lifts' | 'riding' | 'arriving' | 'won' = 'intro';
+  private ticks = 0; // the run's clock, in steps of play
   private loadout: Loadout = freshLoadout();
   private chips = 0;
   private lifts: OfferKind[] = []; // what each back lift leads to, left to right, after a boss
@@ -272,6 +322,7 @@ export class Game {
     this.pops = [];
     this.resetDoors();
     this.score = 0;
+    this.ticks = 0;
     this.combo = 0;
     this.comboT = 0;
     this.deadT = 0;
@@ -321,6 +372,7 @@ export class Game {
     this.quake = null;
     this.spit = [];
     this.waves = [];
+    this.beam = null;
     this.lower.clear();
   }
 
@@ -374,6 +426,8 @@ export class Game {
   };
 
   private update(dt: number) {
+    // The clock runs from the first step to the last blow, hitstop and all.
+    if (this.mode === 'play' && this.player && !this.player.dead && this.phase !== 'won') this.ticks++;
     if (this.hitstop > 0) {
       this.hitstop -= dt;
       return;
@@ -413,15 +467,16 @@ export class Game {
     this.hooks.banner(title, sub, FLOORS[this.floor].dark);
   }
 
-  private king(): Enemy | undefined {
+  // The boss with a health bar across the top: the Root Bug or the Daemon.
+  private headliner(): Enemy | undefined {
     if (this.quake) return this.quake.king;
-    for (const e of this.enemies) if (e.kind === 'king') return e;
+    for (const e of this.enemies) if (e.kind === 'king' || e.kind === 'daemon') return e;
     return undefined;
   }
 
   // The boss bar's white chunk drains after the damage, so hits read.
   private updateBar(dt: number) {
-    const k = this.king();
+    const k = this.headliner();
     const f = k ? clamp(k.hp / k.max, 0, 1) : 0;
     this.barLag = this.barLag > f ? Math.max(f, this.barLag - dt * 0.35) : f;
   }
@@ -434,13 +489,23 @@ export class Game {
     this.toSpawn = this.roster(r);
     this.spawnT = 0;
     const boss = r % 5 === 0;
-    const sub = r === KING_ROUND ? 'The floor is shaking' : boss ? 'Something big is riding the lift' : `${this.toSpawn.length} bugs inbound`;
+    const sub =
+      r === DAEMON_ROUND ? 'Final round'
+      : r === KING_ROUND ? 'The floor is shaking'
+      : boss ? 'Something big is riding the lift'
+      : `${this.toSpawn.length} bugs inbound`;
     this.banner(`Round ${r}`, sub);
     [523, 659, 784].forEach((f, i) => tone(f, f, 0.12, 0.08, 'square', i * 0.11));
   }
 
   private roster(r: number): Kind[] {
     // The king brings its own swarm; a few stragglers come through the doors.
+    if (r === DAEMON_ROUND) {
+      return ['daemon', ...Array.from({ length: 14 }, (): Kind => {
+        const roll = Math.random();
+        return roll < 0.15 ? 'brute' : roll < 0.55 ? 'flyer' : 'crawler';
+      })];
+    }
     if (r === KING_ROUND) return ['king', ...Array.from({ length: 10 }, (): Kind => (Math.random() < 0.3 ? 'flyer' : 'crawler'))];
     const list: Kind[] = [];
     const n = 5 + r * 3;
@@ -462,6 +527,10 @@ export class Game {
       return;
     }
     this.phaseT -= dt;
+    if (this.phase === 'won') {
+      if (this.phaseT <= 0) this.gameOver(true);
+      return;
+    }
     if (this.phase === 'intro' && this.phaseT <= 0) this.phase = 'fight';
     else if (this.phase === 'fight') {
       const maxAlive = Math.min(18, 6 + this.round);
@@ -600,8 +669,8 @@ export class Game {
   // Pick an idle door, preferring ones away from the player.
   private callDoor(kind: Kind): boolean {
     const p = this.player;
-    const big = kind === 'boss' || kind === 'king';
-    let free = this.doors.filter((d) => !d.queue && (!big || d.side === 'back'));
+    const lift = big(kind);
+    let free = this.doors.filter((d) => !d.queue && (!lift || d.side === 'back'));
     if (p && free.length > 1) {
       const far = free.filter((d) => len(d.x - p.x, d.y - p.y) > 70);
       if (far.length) free = far;
@@ -609,8 +678,8 @@ export class Game {
     if (!free.length) return false;
     const d = free[Math.floor(Math.random() * free.length)];
     d.queue = kind;
-    d.charge = big ? 1.8 : 0.9;
-    if (this.mode === 'play') tone(big ? 330 : 880, big ? 330 : 880, 0.08, 0.04, 'sine');
+    d.charge = lift ? 1.8 : 0.9;
+    if (this.mode === 'play') tone(lift ? 330 : 880, lift ? 330 : 880, 0.08, 0.04, 'sine');
     return true;
   }
 
@@ -641,28 +710,34 @@ export class Game {
       burst(0.6, 160, 0.6, 'lowpass');
       tone(140, 50, 0.7, 0.12, 'sawtooth');
       this.banner('The Root Bug', 'Dash through its shockwaves');
+    } else if (kind === 'daemon') {
+      this.shake(6, 0.6);
+      tone(1760, 220, 0.6, 0.06, 'square');
+      burst(0.5, 2400, 0.3, 'bandpass');
+      this.banner('The Daemon', 'Its beam stops at the server racks');
     }
   }
 
   private spawnAt(kind: Kind, x: number, y: number) {
     const r = Math.max(1, this.round);
-    const hp = { crawler: r >= 6 ? 3 : 2, flyer: r >= 8 ? 2 : 1, brute: 8 + r, boss: 30 + r * 5, king: 60 + r * 14 }[kind];
+    const hp = { crawler: r >= 6 ? 3 : 2, flyer: r >= 8 ? 2 : 1, brute: 8 + r, boss: 30 + r * 5, king: 60 + r * 14, daemon: 80 + r * 14 }[kind];
     const speed = {
       crawler: Math.min(66, 32 + r * 2.5),
       flyer: Math.min(64, 36 + r * 2),
       brute: Math.min(30, 18 + r),
       boss: 16,
       king: 18,
+      daemon: 34,
     }[kind];
-    const big = kind === 'boss' || kind === 'king';
+    const large = big(kind);
     this.enemies.push({
-      kind, x, y, z: kind === 'flyer' ? 12 : 0, vx: 0, vy: 0, vz: 0, r: STATS[kind].r, hp, max: hp, speed,
+      kind, x, y, z: kind === 'flyer' ? 12 : kind === 'daemon' ? 7 : 0, vx: 0, vy: 0, vz: 0, r: STATS[kind].r, hp, max: hp, speed,
       dir: 1, flash: 0, t: Math.random() * 10, wind: 0, rush: 0, rx: 0, ry: 0, next: rand(1.5, 3),
-      life: this.mode === 'play' ? Infinity : rand(9, 14), move: 'none', rage: false,
+      life: this.mode === 'play' ? Infinity : rand(9, 14), move: 'none', rage: false, volley: 0,
     });
-    this.puff(x, y, big ? 26 : 6, PAL.r);
-    if (big) this.shake(6, 0.5);
-    if (kind === 'king') this.barLag = 1;
+    this.puff(x, y, large ? 26 : 6, PAL.r);
+    if (large) this.shake(6, 0.5);
+    if (kind === 'king' || kind === 'daemon') this.barLag = 1;
   }
 
   // ── Player ──
@@ -776,6 +851,7 @@ export class Game {
   }
 
   private hurt(p: Player, nx: number, ny: number) {
+    if (this.phase === 'won') return; // nothing left can touch you
     p.hp -= 1;
     p.inv = 1.1;
     p.vx = nx * 160;
@@ -795,7 +871,7 @@ export class Game {
     }
   }
 
-  private gameOver() {
+  private gameOver(won = false) {
     const record = this.score > this.best;
     if (record) {
       this.best = this.score;
@@ -805,7 +881,7 @@ export class Game {
     }
     this.mode = 'over';
     this.player = null;
-    this.hooks.over({ score: this.score, round: this.round, best: this.best, record });
+    this.hooks.over({ score: this.score, round: this.round, best: this.best, record, won, time: this.ticks / 60 });
   }
 
   // ── Bugs ──
@@ -844,6 +920,7 @@ export class Game {
     e.t += dt;
     e.flash -= dt;
     if (e.kind === 'king') return this.updateKing(e, dt);
+    if (e.kind === 'daemon') return this.updateDaemon(e, dt);
     const tgt = this.target();
     const dist = len(tgt.x - e.x, tgt.y - e.y);
 
@@ -934,13 +1011,13 @@ export class Game {
       if (e.next <= 0 && this.player && !this.player.dead) {
         const roll = Math.random();
         const crowd = this.enemies.length > 9;
-        const moves: [Move, number][] = e.rage
-          ? [['charge', 0.25], ['slam', 0.3], ['spit', 0.3], ['summon', crowd ? 0 : 0.15]]
-          : [['charge', 0.4], ['slam', 0.35], ['summon', crowd ? 0 : 0.25]];
-        const total = moves.reduce((a, m) => a + m[1], 0);
-        let acc = 0;
-        e.move = moves.find((m) => (acc += m[1] / total) >= roll)?.[0] ?? 'charge';
-        e.wind = { none: 0, charge: 0.6, slam: 0.8, spit: 0.5, summon: 0.6 }[e.move];
+        e.move = weighted(
+          e.rage
+            ? [['charge', 0.25], ['slam', 0.3], ['spit', 0.3], ['summon', crowd ? 0 : 0.15]]
+            : [['charge', 0.4], ['slam', 0.35], ['summon', crowd ? 0 : 0.25]],
+          roll,
+        );
+        e.wind = WIND[e.move];
         if (e.rage) e.wind *= 0.8;
         e.rx = dx / dist;
         e.ry = dy / dist;
@@ -979,7 +1056,7 @@ export class Game {
       const n = 9;
       for (let i = 0; i < n; i++) {
         const a = base - 0.6 + (1.2 * i) / (n - 1);
-        this.spit.push({ x: e.x + Math.cos(a) * 10, y: e.y + Math.sin(a) * 6, vx: Math.cos(a) * 92, vy: Math.sin(a) * 92, life: 3 });
+        this.spit.push({ x: e.x + Math.cos(a) * 10, y: e.y + Math.sin(a) * 6, vx: Math.cos(a) * 92, vy: Math.sin(a) * 92, life: 3, packet: false });
       }
       burst(0.2, 1400, 0.3, 'bandpass');
       tone(500, 200, 0.18, 0.06, 'square');
@@ -995,6 +1072,165 @@ export class Game {
     }
   }
 
+  // The Daemon keeps its distance, circling the player over the furniture,
+  // and winds up one of four moves: a beam, rings of packets, a blink to the
+  // far side of the room, or a fork of new bugs. Overclocked (from half
+  // health) it's quicker, fires more packets, and its beam follows you.
+  private updateDaemon(e: Enemy, dt: number) {
+    const tgt = this.target();
+    const dx = tgt.x - e.x;
+    const dy = tgt.y - e.y;
+    const want = this.want;
+    want.x = want.y = 0;
+    e.z = 7 + Math.sin(e.t * 2.2) * 2;
+    if (e.volley > 0 && (e.rush -= dt) <= 0) {
+      e.volley -= 1;
+      e.rush = 0.32;
+      this.packets(e, e.volley % 2 ? 0.5 : 0);
+    }
+    const b = this.beam;
+    if (e.wind > 0) {
+      e.wind -= dt;
+      // The aim follows the player until just before it fires.
+      if (e.move === 'beam' && b && e.wind > 0.3) b.a = turn(b.a, Math.atan2(dy, dx), dt * 2.5);
+      if (e.wind <= 0) this.daemonMove(e);
+    } else if (!b) {
+      // A point on a slow circle round the player, about 80px out.
+      const orbit = e.t * (e.rage ? 0.5 : 0.35) * e.dir;
+      const ox = clamp(tgt.x + Math.cos(orbit) * 80, ARENA.x0 + 16, ARENA.x1 - 16) - e.x;
+      const oy = clamp(tgt.y + Math.sin(orbit) * 50, ARENA.y0 + 10, ARENA.y1 - 6) - e.y;
+      const d = len(ox, oy);
+      if (d > 4) {
+        const s = e.rage ? e.speed * 1.4 : e.speed;
+        want.x = (ox / d) * s;
+        want.y = (oy / d) * s;
+      }
+      e.next -= dt;
+      if (e.next <= 0 && this.player && !this.player.dead) {
+        const roll = Math.random();
+        const crowd = this.enemies.length > 9;
+        e.move = weighted(
+          e.rage
+            ? [['beam', 0.35], ['packets', 0.3], ['blink', 0.2], ['fork', crowd ? 0 : 0.15]]
+            : [['beam', 0.4], ['packets', 0.35], ['blink', 0.15], ['fork', crowd ? 0 : 0.1]],
+          roll,
+        );
+        e.wind = WIND[e.move];
+        if (e.rage) e.wind *= 0.75;
+        if (e.move === 'beam') {
+          this.beam = { src: e, a: Math.atan2(dy, dx), on: false, t: 0, hit: false, ex: e.x, ey: e.y };
+          tone(440, 880, e.wind, 0.04, 'sine');
+        } else tone(e.move === 'blink' ? 1200 : 660, e.move === 'blink' ? 300 : 520, 0.2, 0.05, 'square');
+      }
+    }
+    const k = Math.min(1, 4 * dt);
+    e.vx += (want.x - e.vx) * k;
+    e.vy += (want.y - e.vy) * k;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    if (Math.abs(e.vx) > 4) e.dir = e.vx < 0 ? -1 : 1;
+    collide(e, false); // it floats over the furniture
+  }
+
+  private daemonMove(e: Enemy) {
+    const move = e.move;
+    e.move = 'none';
+    e.next = e.rage ? rand(0.8, 1.4) : rand(1.3, 2.1);
+    if (move === 'beam' && this.beam) {
+      this.beam.on = true;
+      this.beam.t = e.rage ? 1.1 : 0.55;
+      this.shake(3, 0.2);
+      tone(1800, 600, 0.4, 0.06, 'sawtooth');
+      burst(0.3, 3000, 0.25, 'highpass');
+    } else if (move === 'packets') {
+      this.packets(e, 0);
+      e.volley = e.rage ? 2 : 1;
+      e.rush = 0.32;
+    } else if (move === 'blink') {
+      // Gone, and back somewhere across the room from the player.
+      const p = this.player;
+      let bx = e.x;
+      let by = e.y;
+      let far = -1;
+      for (let i = 0; i < 12; i++) {
+        const x = rand(ARENA.x0 + 20, ARENA.x1 - 20);
+        const y = rand(ARENA.y0 + 12, ARENA.y1 - 10);
+        const d = p ? len(x - p.x, y - p.y) : 0;
+        if (d > far) (far = d), (bx = x), (by = y);
+        if (d > 110) break;
+      }
+      this.puff(e.x, e.y, 14, PAL.l, e.z + 10);
+      e.x = bx;
+      e.y = by;
+      e.vx = e.vy = 0;
+      this.puff(e.x, e.y, 14, PAL.r, e.z + 10);
+      e.next = 0.35; // and straight into the next move
+      tone(300, 1500, 0.15, 0.05, 'square');
+    } else if (move === 'fork') {
+      const kinds: Kind[] = e.rage ? ['flyer', 'flyer', 'crawler', 'crawler'] : ['flyer', 'flyer', 'flyer'];
+      kinds.forEach((kind, i) => {
+        const a = (i / kinds.length) * Math.PI * 2 + rand(0, 1);
+        const x = clamp(e.x + Math.cos(a) * 20, ARENA.x0 + 6, ARENA.x1 - 6);
+        const y = clamp(e.y + Math.sin(a) * 12, ARENA.y0 + 6, ARENA.y1 - 2);
+        if (kind === 'flyer' || !blocked(x, y, 4)) this.spawnAt(kind, x, y);
+      });
+      tone(300, 900, 0.25, 0.05, 'triangle');
+    }
+  }
+
+  // A ring of packets, turned by `offset` of a step so rings interleave.
+  private packets(e: Enemy, offset: number) {
+    const n = e.rage ? 16 : 12;
+    for (let i = 0; i < n; i++) {
+      const a = ((i + offset) / n) * Math.PI * 2;
+      this.spit.push({ x: e.x + Math.cos(a) * 8, y: e.y + Math.sin(a) * 5, vx: Math.cos(a) * 62, vy: Math.sin(a) * 62, life: 4, packet: true });
+    }
+    tone(990, 660, 0.08, 0.05, 'square');
+  }
+
+  // The beam's reach, this tick: out from the Daemon until a wall or
+  // furniture that stops shots. Its first few pixels pass over whatever
+  // it's floating above.
+  private aimBeam(b: Beam) {
+    const cx = Math.cos(b.a);
+    const cy = Math.sin(b.a);
+    let d = 0;
+    for (; d < 400; d += 2) {
+      const x = b.src.x + cx * d;
+      const y = b.src.y + cy * d;
+      if (x < ARENA.x0 || x > ARENA.x1 || y < FLOOR_TOP || y > FRONT || (d > 10 && stopsShot(x, y))) break;
+    }
+    b.ex = b.src.x + cx * d;
+    b.ey = b.src.y + cy * d;
+  }
+
+  private updateBeam(b: Beam, dt: number) {
+    if (b.src.hp <= 0) return void (this.beam = null);
+    const p = this.player;
+    // Overclocked, it sweeps after the player as it burns.
+    if (b.on && b.src.rage && p) b.a = turn(b.a, Math.atan2(p.y - b.src.y, p.x - b.src.x), dt * 0.75);
+    this.aimBeam(b);
+    if (!b.on) return;
+    b.t -= dt;
+    if (b.t <= 0) return void (this.beam = null);
+    if (Math.random() < 0.5) this.sparks.add(b.ex, b.ey, b.src.z + 18, rand(-40, 40), rand(-20, 20), rand(20, 60), 0.2, Math.random() < 0.5 ? PAL.y : PAL.c);
+    if (!p || p.dead || p.inv > 0 || b.hit) return;
+    // Distance from the player to the beam, across the floor.
+    const sx = b.src.x;
+    const sy = b.src.y;
+    const vx = b.ex - sx;
+    const vy = b.ey - sy;
+    const l2 = vx * vx + vy * vy || 1;
+    const u = clamp(((p.x - sx) * vx + (p.y - sy) * vy) / l2, 0, 1);
+    const ox = p.x - (sx + vx * u);
+    const oy = p.y - (sy + vy * u);
+    if (ox * ox + oy * oy < (p.r + 1.5) ** 2) {
+      b.hit = true;
+      const l = Math.sqrt(l2);
+      this.hurt(p, vx / l, vy / l);
+    }
+  }
+
   // Acid and shockwaves: the only things in the game that hurt from afar.
   private updateHazards(dt: number) {
     const p = this.player;
@@ -1007,7 +1243,7 @@ export class Game {
       const prop = stopsShot(s.x, s.y);
       if (wall || prop) {
         s.life = 0;
-        this.puff(s.x, s.y, 4, PAL.l, 4);
+        this.puff(s.x, s.y, 4, s.packet ? PAL.y : PAL.l, 4);
       } else if (open && len(p.x - s.x, p.y - s.y) < p.r + 2) {
         s.life = 0;
         const d = len(s.vx, s.vy) || 1;
@@ -1028,6 +1264,7 @@ export class Game {
       }
     }
     prune(this.waves, spreading);
+    if (this.beam) this.updateBeam(this.beam, dt);
   }
 
   // ── The fall to B1 ──
@@ -1224,8 +1461,8 @@ export class Game {
         const min = a.r + b.r;
         if (d >= min || d < 0.001) continue;
         const push = (min - d) / 2;
-        const wa = a.kind === 'boss' || a.kind === 'king' ? 0.1 : 1;
-        const wb = b.kind === 'boss' || b.kind === 'king' ? 0.1 : 1;
+        const wa = big(a.kind) ? 0.1 : 1;
+        const wb = big(b.kind) ? 0.1 : 1;
         a.x -= (dx / d) * push * wa;
         a.y -= (dy / d) * push * wa;
         b.x += (dx / d) * push * wb;
@@ -1237,10 +1474,11 @@ export class Game {
   private hitEnemy(e: Enemy, dx: number, dy: number, dmg = 1) {
     e.hp -= dmg;
     e.flash = 0.07;
-    const boss = e.kind === 'boss' || e.kind === 'king';
+    const boss = big(e.kind);
     const heavy = e.kind === 'brute' || boss;
-    e.vx += dx * (e.kind === 'king' ? 6 : heavy ? 20 : 110);
-    e.vy += dy * (e.kind === 'king' ? 6 : heavy ? 20 : 110);
+    const headliner = e.kind === 'king' || e.kind === 'daemon';
+    e.vx += dx * (headliner ? 6 : heavy ? 20 : 110);
+    e.vy += dy * (headliner ? 6 : heavy ? 20 : 110);
     burst(0.05, 3000, 0.2);
     if (this.quake) return;
     // Half its health gone in the office: it takes the floor out.
@@ -1249,6 +1487,7 @@ export class Game {
       this.startQuake(e);
       return;
     }
+    if (e.kind === 'daemon' && !e.rage && e.hp > 0 && e.hp <= e.max / 2) this.overclock(e);
     if (e.hp > 0) return;
 
     this.combo += 1;
@@ -1260,8 +1499,9 @@ export class Game {
     this.puff(e.x, e.y, boss ? 50 : heavy ? 20 : 10, e.kind === 'flyer' ? PAL.r : PAL.k, e.z + 4);
     this.puff(e.x, e.y, boss ? 20 : 4, PAL.r, e.z + 4);
     this.shake(boss ? 9 : heavy ? 3 : 1.5, boss ? 0.6 : 0.12);
-    this.hitstop = e.kind === 'king' ? 0.35 : boss ? 0.2 : heavy ? 0.06 : 0.025;
-    if (e.kind === 'king') {
+    this.hitstop = e.kind === 'daemon' ? 0.5 : e.kind === 'king' ? 0.35 : boss ? 0.2 : heavy ? 0.06 : 0.025;
+    if (e.kind === 'daemon') this.win(e);
+    else if (e.kind === 'king') {
       this.puff(e.x, e.y, 40, PAL.y, 10);
       this.waves = [];
       this.spit = [];
@@ -1274,7 +1514,7 @@ export class Game {
     if (!p) return;
     const l = this.loadout;
     // Chips: a few coins that hop out and roll toward the player.
-    const worth = Math.round({ crawler: 1, flyer: 1, brute: 3, boss: 15, king: 40 }[e.kind] * l.chipMult);
+    const worth = Math.round({ crawler: 1, flyer: 1, brute: 3, boss: 15, king: 40, daemon: 60 }[e.kind] * l.chipMult);
     const coins = Math.min(worth, 5);
     for (let k = 0; k < coins; k++) {
       const a = rand(0, Math.PI * 2);
@@ -1291,6 +1531,39 @@ export class Game {
       const kind = boss || (p.hp < l.maxHp && Math.random() < 0.6) ? 'heart' : 'bolt';
       this.pickups.push({ kind, value: 0, x: e.x, y: e.y, z: 6, vx: 0, vy: 0, vz: 90, r: 4, life: 9 });
     }
+  }
+
+  // Half its health gone: it overclocks.
+  private overclock(e: Enemy) {
+    e.rage = true;
+    e.flash = 0.3;
+    e.next = Math.min(e.next, 1);
+    this.shake(5, 0.5);
+    this.puff(e.x, e.y, 24, PAL.r, e.z + 12);
+    tone(220, 1760, 0.6, 0.07, 'sawtooth');
+    this.banner('Overclocked', 'Now its beam follows you');
+  }
+
+  // The Daemon is down, and the run is won. Everything it was running goes
+  // with it; a moment to take it in, then the result.
+  private win(e: Enemy) {
+    this.phase = 'won';
+    this.phaseT = 3.2;
+    this.beam = null;
+    this.spit = [];
+    this.waves = [];
+    this.toSpawn = [];
+    for (const d of this.doors) d.queue = null;
+    for (const o of this.enemies) {
+      if (o === e || o.hp <= 0) continue;
+      o.hp = 0;
+      this.puff(o.x, o.y, 8, PAL.k, o.z + 4);
+    }
+    this.puff(e.x, e.y, 40, PAL.y, e.z + 12);
+    this.puff(e.x, e.y, 30, PAL.l, e.z + 12);
+    [1760, 1320, 990, 660, 440].forEach((f, i) => tone(f, f * 0.5, 0.18, 0.08, 'square', i * 0.09));
+    [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.08, 'triangle', 0.9 + i * 0.12));
+    this.banner('Daemon terminated', 'B1 is clear');
   }
 
   private mult() {
@@ -1416,13 +1689,15 @@ export class Game {
   private pushHud() {
     const p = this.player;
     const last = this.lastHud;
-    const hp = p ? Math.max(0, p.hp) : 0;
+    // Once the run is over, the hearts stay as they ended.
+    const hp = p ? Math.max(0, p.hp) : (last?.hp ?? 0);
     const rapid = !!p && p.rapid > 0;
     const mult = this.mult();
     const best = Math.max(this.best, this.score);
     const l = this.loadout;
+    const time = Math.floor(this.ticks / 60);
     if (
-      last && last.round === this.round && last.score === this.score && last.best === best && last.hp === hp &&
+      last && last.round === this.round && last.score === this.score && last.best === best && last.hp === hp && last.time === time &&
       last.maxHp === l.maxHp && last.chips === this.chips && last.weaponId === l.weapon && last.mult === mult && last.rapid === rapid
     ) return;
     // At most ten updates a second, except when health or the round changes.
@@ -1431,7 +1706,7 @@ export class Game {
     this.hudAt = now;
     this.lastHud = {
       round: this.round, score: this.score, best, hp, maxHp: l.maxHp, chips: this.chips,
-      weapon: WEAPONS[l.weapon].name, weaponId: l.weapon, mult, rapid,
+      weapon: WEAPONS[l.weapon].name, weaponId: l.weapon, mult, rapid, time,
     };
     this.hooks.hud(this.lastHud);
   }
@@ -1542,12 +1817,15 @@ export class Game {
     const sp = this.sprites;
     const flash = e.flash > 0 || (e.wind > 0 && Math.floor(e.t * 20) % 2 === 0);
     const frame = Math.floor(e.t * (e.kind === 'flyer' ? 10 : 8)) % 2;
+    // Blinking out: it flickers before it goes.
+    if (e.move === 'blink' && e.wind > 0 && Math.floor(e.t * 30) % 2) return;
     const s =
       e.kind === 'crawler' ? sp.crawler[frame]
       : e.kind === 'flyer' ? sp.flyer[frame]
       : e.kind === 'king' ? (e.rage ? sp.kingRage : sp.king)[frame]
+      : e.kind === 'daemon' ? (e.rage ? sp.daemonHot : sp.daemon)[frame]
       : sp.brute[frame];
-    const scale = e.kind === 'boss' || e.kind === 'king' ? 2 : 1;
+    const scale = big(e.kind) ? 2 : 1;
     this.draw(s, e.x - (s.w * scale) / 2, e.y - e.z - s.h * scale + 1, e.dir, flash, scale);
   }
 
@@ -1656,6 +1934,7 @@ export class Game {
       c.fillRect(Math.round(b.x), Math.round(b.y), 1, 1);
     }
     for (const w of this.waves) this.drawWave(w);
+    if (this.beam?.on) this.beamLine(this.beam, 0, 1, 'rgba(17,17,17,0.2)');
 
     // Then everything with height, back to front. One reused list of plain
     // entries rather than a fresh array of closures every frame: less garbage
@@ -1698,7 +1977,18 @@ export class Game {
         c.fillRect(Math.round(b.x - (b.vx / sp2) * (t + h)), Math.round(sy - (b.vy / sp2) * (t + h)), 1, 1);
       }
     }
+    if (this.beam) this.drawBeam(this.beam);
     for (const s of this.spit) {
+      if (s.packet) {
+        // A packet: a square of brass, outlined, blinking white.
+        const x = Math.round(s.x);
+        const y = Math.round(s.y - 8);
+        c.fillStyle = PAL.k;
+        c.fillRect(x - 2, y - 2, 5, 5);
+        c.fillStyle = Math.floor(s.life * 12) % 2 ? PAL.y : '#FFFFFF';
+        c.fillRect(x - 1, y - 1, 3, 3);
+        continue;
+      }
       // A wobbling glob of acid, outlined so it reads on any floor.
       const x = Math.round(s.x);
       const y = Math.round(s.y - 5 + Math.sin(s.life * 18));
@@ -1724,10 +2014,40 @@ export class Game {
     this.drawn++;
   }
 
+  // The Daemon's beam, at the height of its eye. Warming up, a dotted line
+  // that flickers; on, a white-hot core in a band of rust.
+  private drawBeam(b: Beam) {
+    const h = b.src.z + 18;
+    if (!b.on) {
+      if (Math.floor(this.time * 16) % 2) this.beamLine(b, h, 1, PAL.r, 4);
+      return;
+    }
+    this.beamLine(b, h, 3, b.src.rage ? PAL.r : PAL.y);
+    this.beamLine(b, h, 1, '#FFFFFF');
+  }
+
+  // A line of `w`-pixel squares from the Daemon to the beam's end, `h` up;
+  // every `gap`-th pixel only, for a dotted line. One path, one fill.
+  private beamLine(b: Beam, h: number, w: number, color: string, gap = 1) {
+    const c = this.ctx;
+    const sx = b.src.x;
+    const sy = b.src.y - h;
+    const dx = b.ex - b.src.x;
+    const dy = b.ey - b.src.y;
+    const n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)));
+    const o = Math.floor(w / 2);
+    c.beginPath();
+    for (let i = 6; i <= n; i += gap) {
+      c.rect(Math.round(sx + (dx * i) / n) - o, Math.round(sy + (dy * i) / n) - o, w, w);
+    }
+    c.fillStyle = color;
+    c.fill();
+  }
+
   // A shockwave: a pixel ellipse along the floor, brass (rust in a rage)
   // with an ink ring inside.
   private drawWave(w: Wave) {
-    this.ring(w, w.r, this.king()?.rage ? PAL.r : PAL.y);
+    this.ring(w, w.r, this.headliner()?.rage ? PAL.r : PAL.y);
     this.ring(w, w.r - 2, PAL.k);
   }
 
@@ -1868,17 +2188,19 @@ export class Game {
     this.frameNo++;
   }
 
-  // Across the top: a crown and the Root Bug's health. A notch marks half,
-  // where it takes the floor out.
+  // Across the top: the headliner's health, under a crown for the Root Bug or
+  // horns for the Daemon. A notch marks half, where the king takes the floor
+  // out and the Daemon overclocks.
   private drawBossBar() {
-    const k = this.king();
+    const k = this.headliner();
     if (!k || this.mode === 'attract') return;
     const c = this.ctx;
     const w = 120;
     const x = Math.round((VIEW_W - w) / 2);
     const y = 2;
     const f = clamp(k.hp / k.max, 0, 1);
-    c.drawImage(this.sprites.crown, x - 10, y - 1);
+    const icon = k.kind === 'daemon' ? this.sprites.horns : this.sprites.crown;
+    c.drawImage(icon, x - 10, y - 1);
     c.fillStyle = '#3A3A36';
     c.fillRect(x - 1, y - 1, w + 2, 5);
     c.fillStyle = '#1E1E1C';

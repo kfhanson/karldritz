@@ -149,6 +149,33 @@ const mirrorRows = (half: string[]) => half.map((r) => r + [...r].reverse().join
 // Enraged: the circuits run hot and the eyes go brass.
 const enrage = (rows: string[]) => rows.map((r) => r.replace(/l/g, 'r').replace(/c/g, 'y'));
 
+// The Daemon, round 50's boss and the last thing on B1: a horned server
+// chassis that floats over the racks with one red eye. Half, mirrored, like
+// the king.
+const DAEMON_HALF = [
+  '.k........',
+  '.kk.......',
+  '..kk......',
+  '...kkkkkkk',
+  '...kmmmmmm',
+  '..kkmkkkkk',
+  '.kkkmkkkrr',
+  '..kkmkkrry',
+  '.kkkmkkkrr',
+  '..kkmkkkkk',
+  '...kmmmmmm',
+  '...kmlmkml',
+  '...kmmmmmm',
+  '...kkkkkkk',
+];
+// Loose cables, swinging.
+const DAEMON_TAIL = [
+  ['....k..k..', '....k...k.', '.....k....'],
+  ['....k..k..', '...k...k..', '....k.....'],
+];
+// Overclocked: the status lights go red and the eye white-hot.
+const overclock = (rows: string[]) => rows.map((r) => r.replace(/l/g, 'r').replace(/y/g, 'h'));
+
 const HEART = ['.rr.rr.','rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...'];
 const BOLT = ['...yy', '..yy.', '.yyyy', '..yy.', '.yy..', 'yy...'];
 
@@ -159,7 +186,10 @@ export function buildSprites() {
     brute: BRUTE_LEGS.map((legs) => sprite([...BRUTE, ...legs])),
     king: KING_LEGS.map((legs) => sprite(mirrorRows([...KING_HALF, ...legs]))),
     kingRage: KING_LEGS.map((legs) => sprite(enrage(mirrorRows([...KING_HALF, ...legs])))),
+    daemon: DAEMON_TAIL.map((tail) => sprite(mirrorRows([...DAEMON_HALF, ...tail]))),
+    daemonHot: DAEMON_TAIL.map((tail) => sprite(overclock(mirrorRows([...DAEMON_HALF, ...tail])))),
     crown: outlined(['y.y.y', 'yyyyy', 'yryry']),
+    horns: outlined(['r...r', 'rr.rr', '.rrr.']),
     heart: sprite(HEART),
     chip: sprite(['.yy.', 'ywyy', 'yyyy', '.yy.']),
     // Signs over the lifts after a boss, outlined so they read on the wall.
@@ -189,6 +219,8 @@ const GLYPHS: Record<string, string> = {
   '+': '000010111010000',
   x: '000101010101000',
   '-': '000000111000000',
+  ':': '000010000010000',
+  '.': '000000000000010',
 };
 
 /**
