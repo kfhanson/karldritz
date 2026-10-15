@@ -67,7 +67,7 @@ const TEMPLATE = `
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
           <h3>Hold the floor.</h3>
-          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 50 to win.</p>
+          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 20 to win.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
             <button type="button" data-scores>Leaderboard</button>
@@ -78,14 +78,14 @@ const TEMPLATE = `
 
         <section class="ea-screen" data-screen="help" hidden>
           <p class="ea-eyebrow">How to play</p>
-          <h3>Survive 50 rounds.</h3>
+          <h3>Survive 20 rounds.</h3>
           <ul class="ea-keys">
             <li><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> move</li>
             <li><span>Mouse</span> aim, click to shoot</li>
             <li><span><kbd>Space</kbd></span> dash, untouchable for a moment</li>
             <li><span>Pickups</span> hearts heal, bolts fire faster</li>
             <li><span>Combos</span> quick kills multiply score, up to ×5</li>
-            <li><span>Round 50</span> beat the boss to win, then sign the leaderboard</li>
+            <li><span>Round 20</span> beat the boss to win, then sign the leaderboard</li>
           </ul>
           <div class="ea-menu">
             <button type="button" data-back>Back <span>Esc</span></button>
@@ -393,11 +393,24 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     offerKeys = [];
     actions.innerHTML = '';
     if (o.kind === 'perk' && o.perks) {
+      // Two of the three: there are only three stops in a run.
       kicker.textContent = 'Power-up';
-      title.textContent = 'Pick one.';
-      copy.textContent = 'It lasts for the rest of the run.';
-      cards.innerHTML = o.perks.map((p, i) => card(p.name, p.blurb, 'Free', i)).join('');
-      offerKeys = o.perks.map((p) => () => (game.takePerk(p), done()));
+      copy.textContent = 'They last for the rest of the run.';
+      const perks = o.perks.slice();
+      let left = 2;
+      const paint = () => {
+        title.textContent = left === 2 ? 'Pick two.' : 'Pick one more.';
+        cards.innerHTML = perks.map((p, i) => card(p.name, p.blurb, 'Free', i)).join('');
+        offerKeys = perks.map((p) => () => {
+          game.takePerk(p);
+          perks.splice(perks.indexOf(p), 1);
+          if (--left > 0 && perks.length) {
+            paint();
+            cards.querySelector<HTMLElement>('[data-card]')?.focus({ preventScroll: true });
+          } else done();
+        });
+      };
+      paint();
     } else if (o.kind === 'weapon' && o.weapons) {
       kicker.textContent = 'Weapon';
       title.textContent = 'Swap your gun.';

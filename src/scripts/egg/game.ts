@@ -1,9 +1,9 @@
 // Bug Hunt — a 2.5D survival arena. One office floor seen from a three-quarter
 // view; bugs come in through the lifts in the back wall and the side doors,
 // round after round, each round bigger and every fifth with a boss. Round
-// 25's boss, the Root Bug, smashes the floor at half health and the fight
+// 10's boss, the Root Bug, smashes the floor at half health and the fight
 // drops to B1, the server room below, where the run carries on until round
-// 50's boss, the Daemon: beat it and the run is won. Move with WASD, aim at
+// 20's boss, the Daemon: beat it and the run is won. Move with WASD, aim at
 // the cursor, dash out of trouble.
 //
 // The world is the floor plane in pixels; things with height (flyers, bullets,
@@ -36,8 +36,13 @@ const spreading = (w: { r: number; max: number }) => w.r < w.max;
 // The headings a bug tries, nearest first, to get round furniture.
 const STEER_FAN = [0, 0.5, -0.5, 1, -1, 1.6, -1.6];
 
-const KING_ROUND = 25;
-const DAEMON_ROUND = 50; // the last round: beat its boss to win the run
+const KING_ROUND = 10;
+const DAEMON_ROUND = 20; // the last round: beat its boss to win the run
+
+// How dangerous a round's bugs are: tougher, quicker, more of them at once,
+// and more flyers and brutes. It climbs twice as fast as the rounds, so a
+// twenty-round run ramps up like a much longer one would.
+const danger = (round: number) => Math.max(1, round * 2 - 1);
 
 const STEP = 1 / 60;
 const SPEED = 80;
@@ -508,9 +513,10 @@ export class Game {
     }
     if (r === KING_ROUND) return ['king', ...Array.from({ length: 10 }, (): Kind => (Math.random() < 0.3 ? 'flyer' : 'crawler'))];
     const list: Kind[] = [];
-    const n = 5 + r * 3;
-    const flyer = r >= 2 ? Math.min(0.4, 0.1 + 0.05 * r) : 0;
-    const brute = r >= 4 ? Math.min(0.2, 0.04 + 0.02 * r) : 0;
+    const n = Math.min(40, 6 + r * 2);
+    const d = danger(r);
+    const flyer = d >= 2 ? Math.min(0.4, 0.1 + 0.05 * d) : 0;
+    const brute = d >= 4 ? Math.min(0.2, 0.04 + 0.02 * d) : 0;
     for (let i = 0; i < n; i++) {
       const roll = Math.random();
       list.push(roll < brute ? 'brute' : roll < brute + flyer ? 'flyer' : 'crawler');
@@ -533,12 +539,12 @@ export class Game {
     }
     if (this.phase === 'intro' && this.phaseT <= 0) this.phase = 'fight';
     else if (this.phase === 'fight') {
-      const maxAlive = Math.min(18, 6 + this.round);
+      const maxAlive = Math.min(18, 6 + danger(this.round));
       this.spawnT -= dt;
       if (this.spawnT <= 0 && this.toSpawn.length && this.enemies.length + this.queued() < maxAlive) {
         if (this.callDoor(this.toSpawn[0])) {
           this.toSpawn.shift();
-          this.spawnT = Math.max(0.35, 1.3 - this.round * 0.08);
+          this.spawnT = Math.max(0.35, 1.3 - danger(this.round) * 0.08);
         }
       }
       if (!this.toSpawn.length && !this.queued() && !this.enemies.length) {
@@ -719,7 +725,7 @@ export class Game {
   }
 
   private spawnAt(kind: Kind, x: number, y: number) {
-    const r = Math.max(1, this.round);
+    const r = danger(this.round);
     const hp = { crawler: r >= 6 ? 3 : 2, flyer: r >= 8 ? 2 : 1, brute: 8 + r, boss: 30 + r * 5, king: 60 + r * 14, daemon: 80 + r * 14 }[kind];
     const speed = {
       crawler: Math.min(66, 32 + r * 2.5),

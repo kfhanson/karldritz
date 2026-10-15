@@ -120,7 +120,7 @@ const BRUTE_LEGS = [
   ['...kk....kk...', '..kkk....kkk..'],
 ];
 
-// The Root Bug, round 25's boss: a crowned beetle with circuitry in its
+// The Root Bug, round 10's boss: a crowned beetle with circuitry in its
 // shell. Drawn as a left half and mirrored, so it's always symmetrical.
 const KING_HALF = [
   '.......y.y',
@@ -149,7 +149,7 @@ const mirrorRows = (half: string[]) => half.map((r) => r + [...r].reverse().join
 // Enraged: the circuits run hot and the eyes go brass.
 const enrage = (rows: string[]) => rows.map((r) => r.replace(/l/g, 'r').replace(/c/g, 'y'));
 
-// The Daemon, round 50's boss and the last thing on B1: a horned server
+// The Daemon, round 20's boss and the last thing on B1: a horned server
 // chassis that floats over the racks with one red eye. Half, mirrored, like
 // the king.
 const DAEMON_HALF = [

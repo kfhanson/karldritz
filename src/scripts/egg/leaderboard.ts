@@ -7,7 +7,7 @@ export interface Run {
   score: number;
   time: number; // seconds of play
   round: number;
-  won: boolean; // beat the Daemon on round 50
+  won: boolean; // beat the Daemon on round 20
 }
 
 export interface Entry extends Run {
