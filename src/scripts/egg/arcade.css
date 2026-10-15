@@ -449,9 +449,6 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
-[data-screen='scores'] .ea-board {
-  margin-top: clamp(0.8rem, 2.4vw, 1.25rem);
-}
 .ea-board li {
   display: grid;
   grid-column: 1 / -1;
@@ -649,9 +646,24 @@
   .ea-menu button span {
     display: none;
   }
-  /* No room for the board beside the result; the full board, cut to five. */
-  .ea-over-board,
-  [data-screen='scores'] h3,
+  /* No room for the board beside the result: it goes under it, cut to the
+     top three and the player's own run. */
+  .ea-over {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    padding-block: 0.5rem;
+  }
+  .ea-over .ea-menu {
+    margin-top: 0.45rem;
+  }
+  /* Name first; the board once it's saved, in place of the kicker (the
+     title already says how it went). */
+  .ea-over:has(.ea-name:not([hidden])) .ea-over-board,
+  .ea-over:has(.ea-name[hidden]) .ea-eyebrow {
+    display: none;
+  }
+  .ea-over-board .ea-eyebrow,
   .ea-name button span {
     display: none;
   }
@@ -669,7 +681,8 @@
   .ea-board li {
     padding: 0.15rem 0.4rem;
   }
-  .ea-board li:nth-child(n + 6) {
+  .ea-board li:nth-child(n + 4):not(.is-you),
+  .ea-board .ea-board-gap {
     display: none;
   }
 }

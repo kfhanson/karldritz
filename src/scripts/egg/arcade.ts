@@ -70,7 +70,6 @@ const TEMPLATE = `
           <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 20 to win.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
-            <button type="button" data-scores>Leaderboard</button>
             <button type="button" data-help>How to play</button>
             <button type="button" data-exit>Back to portfolio <span>Esc</span></button>
           </div>
@@ -107,15 +106,6 @@ const TEMPLATE = `
             <button type="button" data-resume>Resume <span>Esc</span></button>
             <button type="button" data-start>Restart</button>
             <button type="button" data-menu>Quit to menu</button>
-          </div>
-        </section>
-
-        <section class="ea-screen" data-screen="scores" hidden>
-          <p class="ea-eyebrow">Leaderboard</p>
-          <h3>Best runs.</h3>
-          <ol class="ea-board" data-board-full></ol>
-          <div class="ea-menu">
-            <button type="button" data-back>Back <span>Esc</span></button>
           </div>
         </section>
 
@@ -312,7 +302,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   }
 
   // ── The end of a run, and the leaderboard ──
-  // Every finished run goes on the board. The name field is filled in with
+  // The board shows only here, once a run is over: never over the game.
+  // Every finished run goes on it. The name field is filled in with
   // the last name used; the run is saved when it's submitted, or with
   // whatever is in the field when the player moves on.
   const nameForm = $<HTMLFormElement>('[data-name-form]');
@@ -465,7 +456,6 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       root,
       [
         { id: 'start', label: 'Start game', hint: 'Enter' },
-        { id: 'scores', label: 'Leaderboard' },
         { id: 'help', label: 'How to play' },
         { id: 'exit', label: 'Back to portfolio', hint: 'Esc' },
       ],
@@ -481,7 +471,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   const menuScreen = $('[data-screen="menu"]');
   menuScreen.addEventListener('focusin', (e) => {
     const b = (e.target as Element).closest('button');
-    const id = b && ['start', 'scores', 'help', 'exit'].find((k) => b.hasAttribute(`data-${k}`));
+    const id = b && ['start', 'help', 'exit'].find((k) => b.hasAttribute(`data-${k}`));
     shards?.focus(id ?? null);
   });
   menuScreen.addEventListener('focusout', () => shards?.focus(null));
@@ -496,10 +486,9 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (choosing || leaving) return;
     choosing = true;
     try {
-      if (id === 'help' || id === 'scores') {
-        if (id === 'scores') await paintBoard($('[data-board-full]'), 10);
+      if (id === 'help') {
         if (shards?.visible) await shards.hide();
-        show(id);
+        show('help');
       } else if (id === 'start') {
         if (shards?.visible) await shards.pick(id);
         start();
@@ -553,7 +542,6 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (!t) return;
     if (t.hasAttribute('data-start')) game.mode === 'attract' ? choose('start') : start();
     else if (t.hasAttribute('data-help')) choose('help');
-    else if (t.hasAttribute('data-scores')) choose('scores');
     else if (t.hasAttribute('data-back')) openMenu();
     else if (t.hasAttribute('data-resume')) resume();
     else if (t.hasAttribute('data-menu')) toMenu();
@@ -590,8 +578,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (game.mode === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), resume());
     if (e.code === 'Escape') {
       e.preventDefault();
-      const aside = screens.some((x) => (x.dataset.screen === 'help' || x.dataset.screen === 'scores') && !x.hidden);
-      return void (aside ? openMenu() : choose('exit'));
+      const help = screens.find((x) => x.dataset.screen === 'help');
+      return void (help && !help.hidden ? openMenu() : choose('exit'));
     }
     // Enter starts from the menu or game-over screen unless a button has focus
     // (then the button's own action runs).
