@@ -3,7 +3,8 @@
 // styles travel inside it for the same reason.
 import css from './arcade.css?inline';
 import { isMuted, setMuted } from './audio';
-import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer } from './game';
+import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer, type RunResult } from './game';
+import { clock, lastName, NAME_MAX, saveRun, topRuns, type Entry } from './leaderboard';
 import { WEAPONS } from './upgrades';
 import { HUD_COIN, pixelLine } from './sprites';
 import { gunIcon } from './people';
@@ -43,6 +44,7 @@ const TEMPLATE = `
       <dl class="ea-hud" aria-live="off">
         <div><dt>Round</dt><dd data-round>--</dd></div>
         <div><dt>Score</dt><dd data-score>00000</dd></div>
+        <div class="ea-time"><dt>Time</dt><dd data-time>0:00</dd></div>
         <div class="ea-best"><dt>Best</dt><dd data-best>00000</dd></div>
         <div class="ea-chips"><dt>Chips</dt><dd data-chips>000</dd></div>
         <div class="ea-weapon"><dt>Gun</dt><dd data-weapon>Pistol</dd></div>
@@ -65,9 +67,10 @@ const TEMPLATE = `
         <section class="ea-screen" data-screen="menu">
           <p class="ea-eyebrow">You broke the portfolio</p>
           <h3>Hold the floor.</h3>
-          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives.</p>
+          <p class="ea-copy">Bugs pour in through the lifts and side doors, round after round. Keep moving, aim with the mouse, dash through trouble. Every fifth round, something bigger arrives. Clear round 50 to win.</p>
           <div class="ea-menu">
             <button type="button" data-start>Start game <span>Enter</span></button>
+            <button type="button" data-scores>Leaderboard</button>
             <button type="button" data-help>How to play</button>
             <button type="button" data-exit>Back to portfolio <span>Esc</span></button>
           </div>
@@ -75,13 +78,14 @@ const TEMPLATE = `
 
         <section class="ea-screen" data-screen="help" hidden>
           <p class="ea-eyebrow">How to play</p>
-          <h3>Survive the rounds.</h3>
+          <h3>Survive 50 rounds.</h3>
           <ul class="ea-keys">
             <li><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span> move</li>
             <li><span>Mouse</span> aim, click to shoot</li>
             <li><span><kbd>Space</kbd></span> dash, untouchable for a moment</li>
             <li><span>Pickups</span> hearts heal, bolts fire faster</li>
             <li><span>Combos</span> quick kills multiply score, up to ×5</li>
+            <li><span>Round 50</span> beat the boss to win, then sign the leaderboard</li>
           </ul>
           <div class="ea-menu">
             <button type="button" data-back>Back <span>Esc</span></button>
@@ -106,13 +110,33 @@ const TEMPLATE = `
           </div>
         </section>
 
-        <section class="ea-screen" data-screen="over" hidden>
-          <p class="ea-eyebrow" data-over-kicker>Game over</p>
-          <h3 data-over-title></h3>
-          <p class="ea-copy" data-over-copy></p>
+        <section class="ea-screen" data-screen="scores" hidden>
+          <p class="ea-eyebrow">Leaderboard</p>
+          <h3>Best runs.</h3>
+          <ol class="ea-board" data-board-full></ol>
           <div class="ea-menu">
-            <button type="button" data-start>Play again <span>Enter</span></button>
-            <button type="button" data-menu>Menu</button>
+            <button type="button" data-back>Back <span>Esc</span></button>
+          </div>
+        </section>
+
+        <section class="ea-screen ea-over" data-screen="over" hidden>
+          <div class="ea-over-main">
+            <p class="ea-eyebrow" data-over-kicker>Game over</p>
+            <h3 data-over-title></h3>
+            <p class="ea-copy" data-over-copy></p>
+            <form class="ea-name" data-name-form>
+              <label class="ea-sr" for="ea-name">Your name for the leaderboard</label>
+              <input id="ea-name" data-name maxlength="${NAME_MAX}" placeholder="Your name" autocomplete="nickname" spellcheck="false" enterkeyhint="done" />
+              <button type="submit">Save <span>Enter</span></button>
+            </form>
+            <div class="ea-menu">
+              <button type="button" data-start>Play again</button>
+              <button type="button" data-menu>Menu</button>
+            </div>
+          </div>
+          <div class="ea-over-board">
+            <p class="ea-eyebrow">Leaderboard</p>
+            <ol class="ea-board" data-board></ol>
           </div>
         </section>
       </div>
@@ -232,12 +256,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       });
     },
     offer: (o: Offer) => openOffer(o),
-    over: ({ score, round, best, record }) => {
-      $('[data-over-kicker]').textContent = record ? 'New best' : 'Game over';
-      $('[data-over-title]').textContent = `Fell on round ${round}.`;
-      $('[data-over-copy]').textContent = `Score ${score.toLocaleString()} · best ${best.toLocaleString()}`;
-      setTimeout(() => game.mode === 'over' && show('over'), 200);
-    },
+    over: (r) => gameOver(r),
   });
 
   // Dev only (stripped from builds): lets test scripts drive the game.
@@ -274,6 +293,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     const round = idle ? '--' : pad(h.round, 2);
     pixel('[data-round]', round, round);
     pixel('[data-score]', pad(h.score, 5), String(h.score));
+    const t = clock(h.time);
+    pixel('[data-time]', t, t);
     pixel('[data-best]', pad(h.best, 5), String(h.best));
     pixel('[data-chips]', pad(h.chips, 3), `${h.chips} chips`, coin);
     pixel('[data-weapon]', '', h.weapon, gunIcon(h.weaponId), h.weaponId);
@@ -289,6 +310,69 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (h.mult >= 2) pixel('[data-mult]', `x${h.mult}`, `times ${h.mult}`, undefined, `x${h.mult}`, '#F6F5F1');
     root.classList.toggle('is-rapid', h.rapid);
   }
+
+  // ── The end of a run, and the leaderboard ──
+  // Every finished run goes on the board. The name field is filled in with
+  // the last name used; the run is saved when it's submitted, or with
+  // whatever is in the field when the player moves on.
+  const nameForm = $<HTMLFormElement>('[data-name-form]');
+  const nameInput = $<HTMLInputElement>('[data-name]');
+  let pending: RunResult | null = null;
+  let saving: Promise<void> | null = null;
+
+  const row = (e: Entry, place: number, you: boolean) =>
+    `<li class="${you ? 'is-you' : ''}"><span>${place}</span><b>${esc(e.name)}</b>` +
+    `<em>${e.won ? 'Won' : `R${e.round}`}</em><span>${clock(e.time)}</span><span>${e.score.toLocaleString()}</span></li>`;
+  const empty = '<li class="ea-board-empty">No runs yet. Be the first.</li>';
+
+  // The top of the board, and the player's own run below it if it didn't make the cut.
+  async function paintBoard(list: HTMLElement, n: number, mine?: { entry: Entry; place: number }) {
+    const top = await topRuns(n);
+    const you = (e: Entry) => !!mine && e.at === mine.entry.at && e.score === mine.entry.score;
+    let html = top.map((e, i) => row(e, i + 1, you(e))).join('');
+    if (mine && mine.place > n) html += '<li class="ea-board-gap" aria-hidden="true">···</li>' + row(mine.entry, mine.place, true);
+    list.innerHTML = html || empty;
+  }
+
+  function gameOver(r: RunResult) {
+    pending = r.score > 0 ? r : null;
+    $('[data-over-kicker]').textContent = r.won ? 'You won' : r.record ? 'New best' : 'Game over';
+    $('[data-over-title]').textContent = r.won ? 'B1 is clear.' : `Fell on round ${r.round}.`;
+    $('[data-over-copy]').textContent = `Score ${r.score.toLocaleString()} in ${clock(r.time, true)} · best ${r.best.toLocaleString()}`;
+    nameForm.hidden = !pending;
+    nameInput.value = lastName();
+    paintBoard($('[data-board]'), 5);
+    setTimeout(() => {
+      if (game.mode !== 'over') return;
+      show('over');
+      // With a keyboard to hand, straight into the name; Enter saves it.
+      // (On a touchscreen that would throw a keyboard over the result.)
+      if (pending && window.matchMedia('(pointer: fine)').matches) {
+        nameInput.focus({ preventScroll: true });
+        nameInput.select();
+      } else if (!pending) $('[data-screen="over"] [data-start]').focus({ preventScroll: true });
+    }, 200);
+  }
+
+  function commit(): Promise<void> {
+    if (!pending) return saving ?? Promise.resolve();
+    const r = pending;
+    pending = null;
+    nameForm.hidden = true;
+    saving = saveRun({ name: nameInput.value, score: r.score, time: r.time, round: r.round, won: r.won })
+      .then((mine) => paintBoard($('[data-board]'), 5, mine))
+      .catch(() => {});
+    return saving;
+  }
+
+  nameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    commit();
+    $('[data-screen="over"] [data-start]').focus({ preventScroll: true });
+  });
+  // Keys still held from the run (WASD, say) repeat into the field as it
+  // takes focus: only fresh presses type.
+  nameInput.addEventListener('keydown', (e) => e.repeat && e.key.length === 1 && e.preventDefault());
 
   // ── Lift offers: shop, power-up, weapon, repair ──
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
@@ -368,6 +452,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       root,
       [
         { id: 'start', label: 'Start game', hint: 'Enter' },
+        { id: 'scores', label: 'Leaderboard' },
         { id: 'help', label: 'How to play' },
         { id: 'exit', label: 'Back to portfolio', hint: 'Esc' },
       ],
@@ -383,7 +468,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   const menuScreen = $('[data-screen="menu"]');
   menuScreen.addEventListener('focusin', (e) => {
     const b = (e.target as Element).closest('button');
-    shards?.focus(b?.hasAttribute('data-start') ? 'start' : b?.hasAttribute('data-help') ? 'help' : b?.hasAttribute('data-exit') ? 'exit' : null);
+    const id = b && ['start', 'scores', 'help', 'exit'].find((k) => b.hasAttribute(`data-${k}`));
+    shards?.focus(id ?? null);
   });
   menuScreen.addEventListener('focusout', () => shards?.focus(null));
 
@@ -397,9 +483,10 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (choosing || leaving) return;
     choosing = true;
     try {
-      if (id === 'help') {
+      if (id === 'help' || id === 'scores') {
+        if (id === 'scores') await paintBoard($('[data-board-full]'), 10);
         if (shards?.visible) await shards.hide();
-        show('help');
+        show(id);
       } else if (id === 'start') {
         if (shards?.visible) await shards.pick(id);
         start();
@@ -412,11 +499,13 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   }
 
   const start = () => {
+    commit();
     show(null);
     root.classList.add('is-playing');
     game.start();
   };
   const toMenu = () => {
+    commit();
     game.attract();
     root.classList.remove('is-playing');
     openMenu();
@@ -434,6 +523,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   const leave = () => {
     if (leaving) return;
     leaving = true;
+    commit();
     game.pause();
     resolveExit();
   };
@@ -450,6 +540,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (!t) return;
     if (t.hasAttribute('data-start')) game.mode === 'attract' ? choose('start') : start();
     else if (t.hasAttribute('data-help')) choose('help');
+    else if (t.hasAttribute('data-scores')) choose('scores');
     else if (t.hasAttribute('data-back')) openMenu();
     else if (t.hasAttribute('data-resume')) resume();
     else if (t.hasAttribute('data-menu')) toMenu();
@@ -460,6 +551,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   // ── Keyboard ──
   const onKey = (e: KeyboardEvent) => {
     if (leaving) return;
+    // Typing a name: the keys are letters, not controls.
+    if (e.target === nameInput) return;
     const down = e.type === 'keydown';
     const action = KEYS[e.code];
     if (game.mode === 'play') {
@@ -484,8 +577,8 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     if (game.mode === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), resume());
     if (e.code === 'Escape') {
       e.preventDefault();
-      const help = screens.find((x) => x.dataset.screen === 'help');
-      return void (help && !help.hidden ? openMenu() : choose('exit'));
+      const aside = screens.some((x) => (x.dataset.screen === 'help' || x.dataset.screen === 'scores') && !x.hidden);
+      return void (aside ? openMenu() : choose('exit'));
     }
     // Enter starts from the menu or game-over screen unless a button has focus
     // (then the button's own action runs).

@@ -375,6 +375,127 @@
   color: var(--a-muted);
 }
 
+/* Game over: the result and the name on the left, the board on the right. */
+.ea-over {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 1.5rem clamp(2rem, 6vw, 4.5rem);
+}
+.ea-over-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch; /* the name field and the buttons, one width */
+}
+.ea-over-board {
+  min-width: min(100%, 19rem);
+}
+.ea-name {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: clamp(0.8rem, 2.4vw, 1.25rem);
+  min-width: min(100%, 16rem);
+}
+.ea-name[hidden] {
+  display: none;
+}
+.ea-name input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--a-ink);
+  border-radius: 6px;
+  background: var(--a-canvas);
+  color: var(--a-ink);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.ea-name input:focus-visible {
+  outline: 2px solid var(--a-rust);
+  outline-offset: 1px;
+}
+.ea-name button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--a-ink) !important;
+  border-radius: 6px;
+  background: var(--a-ink) !important;
+  color: var(--a-canvas);
+  font-size: 0.9rem;
+}
+.ea-name button span {
+  font-family: var(--a-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(246 245 241 / 0.6);
+}
+.ea-over .ea-name + .ea-menu {
+  margin-top: 0.6rem;
+}
+
+/* The board: place, name, how far, time, score. */
+.ea-board {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  column-gap: 1rem;
+  min-width: min(100%, 19rem);
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--a-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+[data-screen='scores'] .ea-board {
+  margin-top: clamp(0.8rem, 2.4vw, 1.25rem);
+}
+.ea-board li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid rgb(17 17 17 / 0.1);
+}
+.ea-board b {
+  overflow: hidden;
+  font-weight: 400;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--a-ink);
+}
+.ea-board li > span:first-child {
+  color: var(--a-muted);
+}
+.ea-board em {
+  font-style: normal;
+  color: var(--a-muted);
+}
+.ea-board li.is-you {
+  border-radius: 4px;
+  background: var(--a-ink);
+  color: var(--a-canvas);
+}
+.ea-board li.is-you b,
+.ea-board li.is-you span,
+.ea-board li.is-you em {
+  color: inherit;
+}
+.ea-board .ea-board-empty,
+.ea-board .ea-board-gap {
+  display: block;
+  text-align: center;
+  color: var(--a-muted);
+}
+.ea-board .ea-board-gap {
+  padding: 0;
+  border: 0;
+}
+
 /* Round banner */
 .ea-banner {
   position: absolute;
@@ -486,7 +607,7 @@
 }
 
 @media (max-width: 640px) {
-  .ea-hud div:nth-child(3) {
+  .ea-hud .ea-best {
     display: none;
   }
   .ea-chip[data-mute] {
@@ -526,6 +647,29 @@
     font-size: 0.8rem;
   }
   .ea-menu button span {
+    display: none;
+  }
+  /* No room for the board beside the result; the full board, cut to five. */
+  .ea-over-board,
+  [data-screen='scores'] h3,
+  .ea-name button span {
+    display: none;
+  }
+  .ea-name {
+    margin-top: 0.6rem;
+  }
+  .ea-name input,
+  .ea-name button {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8rem;
+  }
+  .ea-board {
+    font-size: 10px;
+  }
+  .ea-board li {
+    padding: 0.15rem 0.4rem;
+  }
+  .ea-board li:nth-child(n + 6) {
     display: none;
   }
 }
@@ -783,7 +927,8 @@
 /* Buttons speak in the game's voice too; pixel faces run thin, so a step
    heavier. Labels a size up, so the small print stays easy to read. */
 .egg-arcade[data-type='pixel'] .ea-chip,
-.egg-arcade[data-type='pixel'] .ea-menu button {
+.egg-arcade[data-type='pixel'] .ea-menu button,
+.egg-arcade[data-type='pixel'] .ea-name button {
   font-family: var(--a-display);
   font-weight: 500;
   font-size: 1.06em;
