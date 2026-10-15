@@ -1,9 +1,10 @@
 // The player: an office worker, anime-style — spiky dark hair, big eyes, white
-// shirt and tie, ID on a lanyard. Five views drawn, mirrored for eight. Arms
-// are drawn live (so they can reach for a gun); the body is armless.
+// shirt and tie, ID on a lanyard. Five views drawn, mirrored for eight. The
+// sleeves are part of the body; the hands are drawn live, floating by it, so
+// they can hold a gun at any angle without arms stretching to reach it.
 //
-// And the guns, drawn facing east and turned to 16 aim angles, flipped when
-// aiming left so they never hang upside down.
+// And the guns, drawn facing east and turned to 16 aim angles with RotSprite,
+// flipped when aiming left so they never hang upside down.
 import type { Sprite } from './sprites';
 
 const PEOPLE_PAL: Record<string, string> = {
@@ -122,27 +123,39 @@ const BLINK: Partial<Record<View, [number, string][]>> = {
   se: [[4, '.bbssssssss.'], [5, '.bbskksskss.']],
   e: [[4, '.bbbbssssss.'], [5, '.bbbbssskss.']],
 };
+// Short sleeves ('w', a shade off the shirt) hang at the sides, ending where
+// the free hand rests; in profile the near arm runs down the middle.
 const TORSO: Record<View, string[]> = {
-  s: ['...hhsshh...', '..hhhrrhhh..', '..hhhrrhhh..', '..hlhrrhwh..', '..hyhrrhwh..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
-  se: ['...hhsshh...', '..hhhhrrhh..', '..hhhhrrhh..', '..hlhhrrwh..', '..hyhhrrwh..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
-  e: ['...bhsshh...', '...hhhhrh...', '...hhhhrh...', '...hhhhwh...', '...hhhhwh...', '...hhhhwh...', '...kkkkkk...', '...nnnnnn...'],
-  ne: ['...hhsshh...', '..hhhhhhhh..', '..hhhhhhwh..', '..hhhhhhwh..', '..hwhhhhwh..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
-  n: ['...hhsshh...', '..hhhhhhhh..', '..hhhhhhhh..', '..hwhhhhwh..', '..hwhhhhwh..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
+  s: ['...hhsshh...', '.whhhrrhhhw.', '.whhhrrhhhw.', '.wkhlrrhwkw.', '..khyrrhwk..', '..hwhhhhwh..', '..kkkykkkk..', '..nnnnnnnn..'],
+  se: ['...hhsshh...', '.whhhhrrhhw.', '.whhhhrrhhw.', '.wkhlhrrwkw.', '..khyhrrwk..', '..hwhhhhwh..', '..kkkkykkk..', '..nnnnnnnn..'],
+  e: ['...bhsshh...', '...hhhhrh...', '...hwwhrh...', '...hwwhwh...', '...hkkhwh...', '...hhhhwh...', '...kkkkyk...', '...nnnnnn...'],
+  ne: ['...hhhhhh...', '.whhhhhhhhw.', '.whhhhhhwhw.', '.wkhhhhhwkw.', '..khhhhhwk..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
+  n: ['...hhhhhh...', '.whhhhhhhhw.', '.whhhhhhhhw.', '.wkwhhhhwkw.', '..kwhhhhwk..', '..hwhhhhwh..', '..kkkkkkkk..', '..nnnnnnnn..'],
 };
-const LEGS: Record<'front' | 'side', { idle: string[]; a: string[]; b: string[] }> = {
+// A four-step walk: contact, one foot lifted, contact, the other lifted.
+// From the side the legs swap front and back, told apart by their shade.
+const LEGS: Record<'front' | 'side', { idle: string[]; walk: string[][] }> = {
   front: {
     idle: ['..nnn..nnn..', '..nnN..Nnn..', '..kkk..kkk..'],
-    a: ['..nnn..nnn..', '.nnn....nnn.', '.kkk....kkk.'],
-    b: ['...nnnnnn...', '...nn..nn...', '...kk..kk...'],
+    walk: [
+      ['..nnn..nnn..', '.nnN....Nnn.', '.kkk....kkk.'],
+      ['..nnn..nnn..', '..kkk..Nnn..', '.......kkk..'],
+      ['..nnn..nnn..', '.nnN....Nnn.', '.kkk....kkk.'],
+      ['..nnn..nnn..', '..nnN..kkk..', '..kkk.......'],
+    ],
   },
   side: {
     idle: ['...nnnnn....', '...nnnnn....', '...kkkkkk...'],
-    a: ['..nnn.nnn...', '.nnn...nnn..', '.kkk...kkkk.'],
-    b: ['...nnnnn....', '....nnn.....', '....kkkk....'],
+    walk: [
+      ['..NNn.nnn...', '.NNN...nnn..', '.kkk...kkkk.'],
+      ['...Nnnnn....', '...kkknn....', '.....kkkk...'],
+      ['..nnN.NNN...', '.nnn...NNN..', '.kkk...kkkk.'],
+      ['...nnnnN....', '...nnkkk....', '...kkkk.....'],
+    ],
   },
 };
 
-export type PersonFrames = { idle: Sprite; a: Sprite; b: Sprite; blink: Sprite };
+export type PersonFrames = { idle: Sprite; blink: Sprite; walk: Sprite[] };
 
 function frames(v: View): PersonFrames {
   const head = HEAD[v];
@@ -150,11 +163,29 @@ function frames(v: View): PersonFrames {
   for (const [row, line] of BLINK[v] ?? []) shut[row] = line;
   const legs = LEGS[v === 'e' ? 'side' : 'front'];
   const make = (h: string[], l: string[]) => personSprite([...h, ...TORSO[v], ...l]);
-  return { idle: make(head, legs.idle), a: make(head, legs.a), b: make(head, legs.b), blink: make(shut, legs.idle) };
+  return { idle: make(head, legs.idle), blink: make(shut, legs.idle), walk: legs.walk.map((l) => make(head, l)) };
+}
+
+// Knocked flat: the profile, turned to lie along the floor, head first.
+function fallen(): Sprite {
+  const rows = [...HEAD.e.map((r, i) => (i === 4 || i === 5 ? r.replace(/e/g, 'k') : r)), ...TORSO.e, ...LEGS.side.idle];
+  const turn = (c: HTMLCanvasElement) => {
+    const out = document.createElement('canvas');
+    out.width = c.height;
+    out.height = c.width;
+    const g = out.getContext('2d')!;
+    g.translate(out.width, 0);
+    g.rotate(Math.PI / 2);
+    g.drawImage(c, 0, 0);
+    return out;
+  };
+  const right = turn(paintRows(rows, { outline: true }));
+  const left = turn(paintRows(rows, { outline: true, mirror: true }));
+  return { w: right.width, h: right.height, right, left, flash: turn(paintRows(rows, { outline: true, solid: '#FFFFFF' })) };
 }
 
 export function buildPerson() {
-  return { s: frames('s'), se: frames('se'), e: frames('e'), ne: frames('ne'), n: frames('n') };
+  return { s: frames('s'), se: frames('se'), e: frames('e'), ne: frames('ne'), n: frames('n'), down: fallen() };
 }
 export type Person = ReturnType<typeof buildPerson>;
 
@@ -164,13 +195,14 @@ export const PERSON_VIEW: [View, boolean][] = [
   ['e', true], ['ne', true], ['n', false], ['ne', false],
 ];
 
-/** Sprite size including the outline: 14 × 21. Shoulders sit 8px above the feet. */
-export const PERSON_SHOULDER = 8;
+/** Sprite size including the outline: 14 × 21. The hands are held 9px above
+ * the feet, at the bottom of the sleeves; shots fly at that height. */
+export const PERSON_SHOULDER = 9;
 
 // ── Guns ──
-// Drawn pointing east, held at `grip` (where the hand is, in pixel-centre
-// coordinates), with the muzzle `muzzle` px ahead of it and, for long guns,
-// the other hand on the `fore`-grip.
+// Drawn pointing east, held at `grip` (where the hand goes), with the muzzle
+// `muzzle` px ahead of it and, for long guns, the other hand `fore` px ahead
+// on the fore-grip. No hands in the art: they're drawn live, over it.
 interface GunArt {
   rows: string[];
   grip: [number, number];
@@ -179,33 +211,38 @@ interface GunArt {
 }
 
 const GUN_ART: Record<string, GunArt> = {
+  // Slide over a frame, a trigger guard, and the grip raked back.
   pistol: {
-    rows: ['.kkkkkkk.', '.kmmmmmmk', '.kMMMMkk.', '.ssk.k...', '.ss......'],
+    rows: ['.kkkkkkkk.', 'kmmmmmmmmk', 'kMMMMMMMMk', 'kkMMkkkkk.', '.kMMk.k...', '.kMMkkk...', '.kkkk.....'],
     grip: [2, 4],
     muzzle: 7,
   },
+  // Stubby, with a stock and a long magazine.
   smg: {
-    rows: ['..kkkkkkk..', '.kmmmmmmmkk', 'kkMMMMMMk..', 'k.sskk.k...', '..ss.k.....', '.....k.....'],
-    grip: [3, 4],
-    muzzle: 8,
+    rows: ['..kkkkkkkkk.', 'kkkmmmmmmmmk', 'kMkMMMMMMMk.', 'kkkMMkkMk...', '...kMk.Mk...', '...kkk.Mk...', '.......kk...'],
+    grip: [4, 4],
+    muzzle: 7,
+    fore: 3,
+  },
+  // Wooden stock and pump, a long barrel.
+  shotgun: {
+    rows: ['....kkkkkkkkkkkk', 'kkkkmmmmmmmmmmmk', 'kookMMMkkoooookk', 'kookkMk..kkkkk..', '.kk.kMk.........', '....kk..........'],
+    grip: [5, 4],
+    muzzle: 10,
+    fore: 6,
+  },
+  // Coils glowing down the barrel.
+  rail: {
+    rows: ['....kkkkkkkkkkkkk', 'kkkkmgmgmgmgmgmmk', 'kMMkMMMMkkkkkkkk.', 'kMkkMkMk.........', '.k.kMk.k.........', '...kk............'],
+    grip: [4, 4],
+    muzzle: 12,
     fore: 4,
   },
-  shotgun: {
-    rows: ['....kkkkkkkkkkk', 'kkkkmmmmmmmmmmk', 'kookMMMkkooook.', 'kook.ss....kk..', '.kk..ss........'],
-    grip: [6, 4],
-    muzzle: 9,
-    fore: 5,
-  },
-  rail: {
-    rows: ['....kkkkkkkkkkkk', 'kkkkmgmgmgmgmgmk', 'kMMkMMMMkkkkkkk.', 'kMk.ss.k........', '.k..ss..........'],
-    grip: [5, 4],
-    muzzle: 11,
-    fore: 5,
-  },
+  // A long barrel, a brass cylinder, a curved wooden grip.
   revolver: {
-    rows: ['..kkkkkkkk', '.kMmmmmmmk', 'kkyyMkkkk.', '.ssk......', '.ss.......'],
+    rows: ['..kkkkkkkkkk', '.kMmmmmmmmmk', '.kyyMkkkkkk.', '.koMk.k.....', 'kookkk......', 'kok.........', 'kk..........'],
     grip: [2, 4],
-    muzzle: 8,
+    muzzle: 9,
   },
 };
 
@@ -219,13 +256,58 @@ export interface Gun {
   icon: HTMLCanvasElement;
 }
 
-// Turn the east-facing art about its grip, nearest-pixel. Aiming left uses the
-// art flipped top-to-bottom first, so the gun stays upright.
-function turnGun(art: GunArt, angle: number, flipY: boolean): { c: HTMLCanvasElement; half: number } {
-  const src = paintRows(art.rows);
-  const sw = src.width;
-  const sh = src.height;
-  const sd = src.getContext('2d')!.getImageData(0, 0, sw, sh).data;
+// Scale2x: doubles pixel art, rounding off its stairs the way an artist
+// would. Outside the image counts as clear.
+function scale2x(src: Uint32Array, w: number, h: number): Uint32Array {
+  const out = new Uint32Array(w * h * 4);
+  const w2 = w * 2;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = src[y * w + x];
+      const a = y > 0 ? src[(y - 1) * w + x] : 0;
+      const b = x < w - 1 ? src[y * w + x + 1] : 0;
+      const c = x > 0 ? src[y * w + x - 1] : 0;
+      const d = y < h - 1 ? src[(y + 1) * w + x] : 0;
+      const o = y * 2 * w2 + x * 2;
+      out[o] = c === a && c !== d && a !== b ? a : p;
+      out[o + 1] = a === b && a !== c && b !== d ? b : p;
+      out[o + w2] = d === c && d !== b && c !== a ? c : p;
+      out[o + w2 + 1] = b === d && b !== a && d !== c ? d : p;
+    }
+  }
+  return out;
+}
+
+// The art at 8×, through Scale2x three times: what RotSprite turns. Made
+// once per gun and way up, then turned to every angle.
+interface Big {
+  px: Uint32Array;
+  sw: number; // the art's own size
+  sh: number;
+}
+// A palette colour as an ImageData pixel (bytes R, G, B, A; little-endian).
+const pixel = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16);
+  return (0xff << 24) | ((n & 0xff) << 16) | (n & 0xff00) | (n >> 16);
+};
+
+// Straight from the rows: reading pixels back off a canvas stalls on the GPU.
+function enlarge(art: GunArt, flipY: boolean): Big {
+  const rows = flipY ? art.rows.slice().reverse() : art.rows;
+  const sw = rows[0].length;
+  const sh = rows.length;
+  let px: Uint32Array = new Uint32Array(sw * sh);
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (rows[y][x] !== '.') px[y * sw + x] = pixel(PEOPLE_PAL[rows[y][x]]);
+  for (let k = 0; k < 3; k++) px = scale2x(px, sw << k, sh << k);
+  return { px, sw, sh };
+}
+
+// Turn the east-facing art about its grip with RotSprite: turn the 8× art
+// and take the commonest colour among nine samples in each pixel, so lines
+// stay unbroken at every angle. Aiming left uses the art flipped
+// top-to-bottom, so the gun stays upright.
+function turnGun(art: GunArt, { px: big, sw, sh }: Big, angle: number, flipY: boolean): { c: HTMLCanvasElement; half: number } {
+  const bw = sw * 8;
   const gx = art.grip[0] + 0.5;
   const gy = flipY ? sh - (art.grip[1] + 0.5) : art.grip[1] + 0.5;
   const reach = Math.ceil(Math.max(Math.hypot(gx, gy), Math.hypot(sw - gx, gy), Math.hypot(gx, sh - gy), Math.hypot(sw - gx, sh - gy)));
@@ -235,23 +317,31 @@ function turnGun(art: GunArt, angle: number, flipY: boolean): { c: HTMLCanvasEle
   out.height = size;
   const g = out.getContext('2d')!;
   const img = g.createImageData(size, size);
+  const px = new Uint32Array(img.data.buffer);
   const cos = Math.cos(-angle);
   const sin = Math.sin(-angle);
+  const seen = new Uint32Array(9);
+  const count = new Uint8Array(9);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const dx = x + 0.5 - (reach + 0.5);
-      const dy = y + 0.5 - (reach + 0.5);
-      const sx = Math.floor(dx * cos - dy * sin + gx);
-      let sy = Math.floor(dx * sin + dy * cos + gy);
-      if (sx < 0 || sx >= sw || sy < 0 || sy >= sh) continue;
-      if (flipY) sy = sh - 1 - sy;
-      const i = (sy * sw + sx) * 4;
-      if (sd[i + 3] === 0) continue;
-      const o = (y * size + x) * 4;
-      img.data[o] = sd[i];
-      img.data[o + 1] = sd[i + 1];
-      img.data[o + 2] = sd[i + 2];
-      img.data[o + 3] = 255;
+      let kinds = 0;
+      for (let v = -1; v <= 1; v++) {
+        for (let u = -1; u <= 1; u++) {
+          const dx = x + 0.5 + u / 3 - (reach + 0.5);
+          const dy = y + 0.5 + v / 3 - (reach + 0.5);
+          const sx = Math.floor((dx * cos - dy * sin + gx) * 8);
+          const sy = Math.floor((dx * sin + dy * cos + gy) * 8);
+          const col = sx < 0 || sx >= bw || sy < 0 || sy >= sh * 8 ? 0 : big[sy * bw + sx];
+          let i = 0;
+          while (i < kinds && seen[i] !== col) i++;
+          if (i === kinds) (seen[kinds] = col), (count[kinds++] = 0);
+          // The middle sample counts a little extra, to settle ties.
+          count[i] += u === 0 && v === 0 ? 2 : 1;
+        }
+      }
+      let best = 0;
+      for (let i = 1; i < kinds; i++) if (count[i] > count[best]) best = i;
+      px[y * size + x] = seen[best];
     }
   }
   g.putImageData(img, 0, 0);
@@ -263,9 +353,12 @@ export function buildGuns(): Record<string, Gun> {
   for (const [id, art] of Object.entries(GUN_ART)) {
     const frames: HTMLCanvasElement[] = [];
     let half = 0;
+    const upright = enlarge(art, false);
+    const flipped = enlarge(art, true);
     for (let k = 0; k < GUN_ANGLES; k++) {
       const a = (k / GUN_ANGLES) * Math.PI * 2;
-      const t = turnGun(art, a, Math.cos(a) < -0.01);
+      const flip = Math.cos(a) < -0.01;
+      const t = turnGun(art, flip ? flipped : upright, a, flip);
       frames.push(t.c);
       half = t.half;
     }

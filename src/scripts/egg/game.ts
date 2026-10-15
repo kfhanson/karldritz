@@ -51,7 +51,7 @@ const DASH_TIME = 0.17;
 const DASH_COOL = 0.65;
 const BULLET = 300;
 const GUN_Z = PERSON_SHOULDER; // shots fly at shoulder height
-const REACH = 4; // how far the gun hand is from the shoulder
+const REACH = 5; // how far the gun hand floats out from the body
 
 export type Kind = 'crawler' | 'flyer' | 'brute' | 'boss' | 'king' | 'daemon';
 
@@ -72,6 +72,7 @@ interface Player extends Body {
   dx: number; // dash direction
   dy: number;
   anim: number;
+  hurt: number; // a white flash, just after a hit
   dead: boolean;
 }
 
@@ -339,7 +340,7 @@ export class Game {
     this.player = {
       x: 160, y: 118, z: 0, vx: 0, vy: 0, vz: 0, r: 4,
       lx: 0, ly: 1, kick: 0, blink: 2, hp: this.loadout.maxHp, inv: 0, cool: 0, rapid: 0,
-      dash: 0, dashCool: 0, dx: 1, dy: 0, anim: 0, dead: false,
+      dash: 0, dashCool: 0, dx: 1, dy: 0, anim: 0, hurt: 0, dead: false,
     };
     this.mode = 'play';
     this.startRound(1);
@@ -841,6 +842,7 @@ export class Game {
       if (w.id === 'shotgun') (p.vx -= aim.x * 60), (p.vy -= aim.y * 60);
     }
     p.inv -= dt;
+    p.hurt -= dt;
     p.rapid -= dt;
     p.anim += len(p.vx, p.vy) * dt;
 
@@ -860,6 +862,7 @@ export class Game {
     if (this.phase === 'won') return; // nothing left can touch you
     p.hp -= 1;
     p.inv = 1.1;
+    p.hurt = 0.12;
     p.vx = nx * 160;
     p.vy = ny * 160;
     this.combo = 0;
@@ -1782,37 +1785,24 @@ export class Game {
     c.fillRect(Math.round(x - w / 2) + 1, Math.round(y) + 1, w - 2, 1);
   }
 
-  // An arm: a sleeve from shoulder to hand, outlined, with a hand at the end
-  // when it's not holding anything.
-  private arm(from: { x: number; y: number }, to: { x: number; y: number }, bareHand: boolean) {
+  // A hand: two by two of skin in a rounded outline.
+  private fist(x: number, y: number) {
     const c = this.ctx;
-    const n = Math.max(1, Math.ceil(len(to.x - from.x, to.y - from.y)));
-    const pts = Array.from({ length: n + 1 }, (_, i) => ({
-      x: Math.round(from.x + ((to.x - from.x) * i) / n),
-      y: Math.round(from.y + ((to.y - from.y) * i) / n),
-    }));
+    x = Math.round(x - 1);
+    y = Math.round(y - 1);
     c.fillStyle = PEOPLE.k;
-    for (const q of pts) c.fillRect(q.x - 1, q.y - 1, 3, 3);
-    c.fillStyle = PEOPLE.h;
-    for (const q of pts) c.fillRect(q.x, q.y, 1, 1);
-    if (bareHand) this.fist(to);
-  }
-
-  private fist(at: { x: number; y: number }) {
-    const c = this.ctx;
-    const x = Math.round(at.x);
-    const y = Math.round(at.y);
-    c.fillStyle = PEOPLE.k;
-    c.fillRect(x - 1, y - 1, 3, 3);
+    c.fillRect(x - 1, y, 4, 2);
+    c.fillRect(x, y - 1, 2, 4);
     c.fillStyle = PEOPLE.s;
-    c.fillRect(x, y, 1, 1);
+    c.fillRect(x, y, 2, 2);
+    c.fillStyle = PEOPLE.S;
+    c.fillRect(x, y + 1, 2, 1);
   }
 
   private draw(s: Sprite, x: number, y: number, face: number, flash = false, scale = 1) {
     const img = flash ? s.flash : face < 0 ? s.left : s.right;
     this.ctx.drawImage(img, Math.round(x), Math.round(y), s.w * scale, s.h * scale);
   }
-
   private drawPickup(k: Pickup) {
     const sp = this.sprites;
     const s = k.kind === 'chip' ? sp.chip : k.kind === 'heart' ? sp.heart : sp.bolt;
@@ -1837,42 +1827,57 @@ export class Game {
 
   private drawPlayer(p: Player) {
     const c = this.ctx;
-    // Body: one of eight views, from where it's looking.
-    const oct = (Math.round(Math.atan2(p.ly, p.lx) / (Math.PI / 4)) + 8) % 8;
+    const won = this.phase === 'won';
+    // Body: one of eight views, from where it's looking (at the camera, once
+    // the run is won).
+    const lx = won ? 0 : p.lx;
+    const ly = won ? 1 : p.ly;
+    const oct = (Math.round(Math.atan2(ly, lx) / (Math.PI / 4)) + 8) % 8;
     const [view, mirror] = PERSON_VIEW[oct];
     const f = this.person[view];
-    const moving = len(p.vx, p.vy) > 10;
-    const step = Math.floor(p.anim / 6) % 2;
-    const s = moving ? (step ? f.a : f.b) : p.blink < 0 ? f.blink : f.idle;
-    // A bob: on every step, or a slow breath when standing.
-    const bob = moving ? (step ? -1 : 0) : Math.floor(this.time * 1.6) % 2 ? -1 : 0;
+    const moving = !won && len(p.vx, p.vy) > 10;
+    const step = Math.floor(p.anim / 5) % 4;
+    const s = moving ? f.walk[step] : p.blink < 0 ? f.blink : f.idle;
+    // A bob: up as a foot passes, a slow breath standing, hops when it's won.
+    const bob = won ? -Math.round(Math.abs(Math.sin(this.time * 7)) * 3)
+      : moving ? (step % 2 ? -1 : 0)
+      : Math.floor(this.time * 1.6) % 2 ? -1 : 0;
     const bx = Math.round(p.x - s.w / 2);
     const by = Math.round(p.y - s.h + 1 + bob);
+    const face = mirror ? -1 : 1;
 
-    // Arms and gun. The gun hand reaches from the shoulder on the aiming
-    // side; the other hand takes the fore-grip of a long gun, or hangs.
-    const aim = this.aimDir(p);
+    // A dash leaves a couple of fading copies behind it.
+    if (p.dash > 0) {
+      c.save();
+      c.globalAlpha = 0.18;
+      this.draw(s, bx - p.dx * 10, by - p.dy * 10, face);
+      c.globalAlpha = 0.35;
+      this.draw(s, bx - p.dx * 5, by - p.dy * 5, face);
+      c.restore();
+    }
+
+    // The hands float by the body: the gun hand out along the aim, the other
+    // on a long gun's fore-grip or resting at the side. Won, the gun goes up.
+    const aim = won ? { x: 0, y: -1 } : this.aimDir(p);
     const gun = this.guns[this.loadout.weapon];
-    const sy = p.y - PERSON_SHOULDER + bob;
+    const cy = p.y - PERSON_SHOULDER + bob;
     const side = Math.abs(aim.x) > 0.2 ? Math.sign(aim.x) : oct === 6 ? 1 : -1;
-    const gunShoulder = { x: p.x + side * 4, y: sy };
-    const offShoulder = { x: p.x - side * 4, y: sy };
     const reach = REACH - (p.kick / 0.08) * 1.5;
-    const hand = { x: gunShoulder.x + aim.x * reach, y: gunShoulder.y + aim.y * reach };
+    // Aiming down the room, the gun goes to the hip rather than over the body.
+    const hx = won ? p.x + 5 : p.x + aim.x * reach + side * (aim.y > 0 ? 4 : 2) * (1 - Math.abs(aim.x));
+    const hy = won ? cy - 6 : cy + aim.y * reach * 0.7;
     const k = (Math.round((Math.atan2(aim.y, aim.x) / (Math.PI * 2)) * GUN_ANGLES) + GUN_ANGLES) % GUN_ANGLES;
-    const swing = moving ? (step ? 1 : -1) : 0;
-    const offHand = gun.fore
-      ? { x: hand.x + aim.x * gun.fore, y: hand.y + aim.y * gun.fore }
-      : { x: offShoulder.x - side * 0.5, y: offShoulder.y + 6 + swing };
-    const arms = () => {
-      this.arm(gunShoulder, hand, false);
-      this.arm(offShoulder, offHand, !gun.fore);
-      c.drawImage(gun.frames[k], Math.round(hand.x - gun.half), Math.round(hand.y - gun.half));
-      if (gun.fore) this.fist(offHand);
+    const swing = moving ? [0, 1, 0, -1][step] : 0;
+    const ox = gun.fore ? hx + aim.x * gun.fore : p.x - side * 5;
+    const oy = gun.fore ? hy + aim.y * gun.fore * 0.7 : cy + 2 + swing;
+    const hands = () => {
+      c.drawImage(gun.frames[k], Math.round(hx - gun.half), Math.round(hy - gun.half));
+      this.fist(hx, hy);
+      this.fist(ox, oy);
       // Muzzle flash on the frame of a shot.
       if (p.kick > 0.05) {
-        const mx = Math.round(hand.x + aim.x * (gun.muzzle + 1.5));
-        const my = Math.round(hand.y + aim.y * (gun.muzzle + 1.5));
+        const mx = Math.round(hx + aim.x * (gun.muzzle + 1.5));
+        const my = Math.round(hy + aim.y * (gun.muzzle + 1.5) - 2);
         c.fillStyle = PAL.y;
         c.fillRect(mx - 1, my, 3, 1);
         c.fillRect(mx, my - 1, 1, 3);
@@ -1881,10 +1886,10 @@ export class Game {
       }
     };
 
-    const behind = aim.y < -0.35; // aiming up the room: the body is in front
-    if (behind) arms();
-    this.draw(s, bx, by, mirror ? -1 : 1);
-    if (!behind) arms();
+    const behind = !won && aim.y < -0.35; // aiming up the room: the body is in front
+    if (behind) hands();
+    this.draw(s, bx, by, face, p.hurt > 0);
+    if (!behind) hands();
 
     // Rapid fire: a spark over the head.
     if (p.rapid > 0 && Math.floor(this.time * 8) % 2) {
@@ -1894,6 +1899,13 @@ export class Game {
     }
   }
 
+  // Down: knocked flat the way the last hit pushed, with a little bounce.
+  private drawFallen(p: Player) {
+    const s = this.person.down;
+    const t = clamp(this.deadT / 0.35, 0, 1);
+    const hop = Math.round(Math.sin(t * Math.PI) * 5);
+    this.draw(s, p.x - s.w / 2, p.y - s.h + 1 - hop, p.vx < 0 ? -1 : 1);
+  }
   private render() {
     const c = this.ctx;
     // Shake shifts the whole room, so paint the uncovered edge first.
@@ -1935,6 +1947,8 @@ export class Game {
     const inLift = this.phase === 'riding' && this.phaseT < 0.45;
     const p = this.player && !this.player.dead && this.mode !== 'offer' && !inLift ? this.player : null;
     if (p) this.shadow(p.x, p.y, 4);
+    const down = this.player?.dead ? this.player : null;
+    if (down) this.shadow(down.x, down.y, 8);
     for (const b of this.bullets) {
       c.fillStyle = 'rgba(17,17,17,0.18)';
       c.fillRect(Math.round(b.x), Math.round(b.y), 1, 1);
@@ -1950,7 +1964,8 @@ export class Game {
     for (const pr of PROPS) this.put(pr.y + pr.h, 0, pr);
     for (const k of this.pickups) if (!(k.life < 2 && Math.floor(k.life * 10) % 2)) this.put(k.y, 1, k);
     for (const e of this.enemies) this.put(e.y, 2, e);
-    if (p && !(p.inv > 0 && p.dash <= 0 && Math.floor(p.inv * 14) % 2)) this.put(p.y, 3, p);
+    if (p && !(p.inv > 0 && p.dash <= 0 && p.hurt <= 0 && Math.floor(p.inv * 14) % 2)) this.put(p.y, 3, p);
+    if (down) this.put(down.y, 4, down);
     const n = this.drawn;
     // Insertion sort: the order barely changes between frames, so it's near-linear.
     for (let i = 1; i < n; i++) {
@@ -1967,7 +1982,8 @@ export class Game {
       if (it.kind === 0) drawProp(this.ctx, it.ref as Prop, this.time);
       else if (it.kind === 1) this.drawPickup(it.ref as Pickup);
       else if (it.kind === 2) this.drawEnemy(it.ref as Enemy);
-      else this.drawPlayer(it.ref as Player);
+      else if (it.kind === 3) this.drawPlayer(it.ref as Player);
+      else this.drawFallen(it.ref as Player);
     }
 
     // Shots and sparks on top.
