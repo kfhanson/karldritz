@@ -91,7 +91,12 @@ await Promise.all(
     )}
   </div>
 
-  <canvas data-buddy class="buddy pointer-events-none absolute left-0 top-0 z-10" aria-hidden="true"></canvas>
+  <!-- Placed at the character's feet by scripts/buddy.ts; the body lifts off it on a hop. -->
+  <div data-buddy class="buddy pointer-events-none absolute left-0 top-0 z-10" aria-hidden="true" hidden>
+    <canvas data-buddy-shadow></canvas>
+    <canvas data-buddy-body></canvas>
+    <p class="buddy-say font-mono text-xs text-ink" data-buddy-say>try spam-clicking the logo</p>
+  </div>
 
   <p class="font-mono text-xs text-ink-muted text-center pt-12">
     More coming soon — still writing them up 😅
@@ -99,7 +104,38 @@ await Promise.all(
 </section>
 
 <style>
-  .buddy { image-rendering: pixelated; }
+  .buddy { width: 0; height: 0; will-change: transform; }
+  .buddy canvas { position: absolute; image-rendering: pixelated; }
+  .buddy [data-buddy-body] { will-change: transform; }
+  .buddy-say {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    white-space: nowrap;
+    padding: 6px 10px;
+    background: #fff;
+    border: 1px solid var(--color-wire);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(17, 17, 17, 0.06);
+    opacity: 0;
+    transform: translate(-50%, 4px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  /* the tail, pointing down at the speaker */
+  .buddy-say::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -5px;
+    width: 8px;
+    height: 8px;
+    margin-left: -4px;
+    background: #fff;
+    border: solid var(--color-wire);
+    border-width: 0 1px 1px 0;
+    transform: rotate(45deg);
+  }
+  .buddy-say[data-on] { opacity: 1; transform: translate(-50%, 0); }
   .buddy-hint { transition: opacity 0.4s ease; }
   .buddy-hint[data-gone] { opacity: 0; }
 </style>
