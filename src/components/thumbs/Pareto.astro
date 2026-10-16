@@ -1,0 +1,213 @@
+---
+// ParetoSignal — one BSD intersection on the left, its LSTM-DQN agent switching
+// the north–south and east–west phases while queues build and clear. On the
+// right, NSGA-II's population of reward weights evolves down onto a Pareto front
+// and the balanced policy is picked. The two arcs between them are the nested
+// loop: weights go down to the agent, fitness comes back up.
+interface Props { label: string }
+const { label } = Astro.props;
+
+// Intersection tile. Traffic keeps left (Indonesia), so each direction's lane
+// sits to the left of the centre line.
+const CX = 190, CY = 150, LANE = 11;
+// Every lane path is 320 long and starts and ends outside the tile's clip. A car
+// queued q-th waits at --stop: its front on the stop line, minus a car-gap per q.
+const LANES = [
+  { p: `M ${CX + LANE} -10 V 310`, axis: 'ns' }, // southbound
+  { p: `M ${CX - LANE} 310 V -10`, axis: 'ns' }, // northbound
+  { p: `M 30 ${CY - LANE} H 350`, axis: 'ew' },  // eastbound
+  { p: `M 350 ${CY + LANE} H 30`, axis: 'ew' },  // westbound
+];
+const cars = LANES.flatMap((l) => [0, 1, 2].map((q) => ({ ...l, stop: 38.75 - q * 6.9 })));
+// Signal heads on the kerb corner beside each stop line, by the axis they release.
+const SIGNALS = [
+  { x: CX + 30, y: CY - 30, axis: 'ns' }, { x: CX - 30, y: CY + 30, axis: 'ns' },
+  { x: CX - 30, y: CY - 30, axis: 'ew' }, { x: CX + 30, y: CY + 30, axis: 'ew' },
+];
+
+// Pareto chart: both objectives minimised, so the front bows toward the origin.
+const O = { x: 430, y: 262 };
+const P0 = [456, 58], P1 = [472, 238], P2 = [708, 246];
+const bez = (t: number) => [0, 1].map((k) => (1 - t) ** 2 * P0[k] + 2 * t * (1 - t) * P1[k] + t * t * P2[k]);
+const FRONT_T = [0.04, 0.16, 0.3, 0.45, 0.6, 0.76, 0.92];
+const BALANCED = 3;
+// Population: the front itself plus dominated policies behind it. Each starts
+// further up-and-right (worse) and settles over the cycle, a few generations at
+// a time. Offsets are fixed so SSR is stable.
+const SPREAD = [[70, -90], [60, -70], [95, -60], [40, -110], [110, -40], [80, -80], [50, -50]];
+const BEHIND = [[22, -34], [40, -20], [18, -52], [46, -40], [30, -26], [60, -30], [26, -18]];
+const clampPt = (x: number, y: number) => [Math.min(712, Math.max(446, x)), Math.min(250, Math.max(44, y))];
+const dots = [
+  ...FRONT_T.map((t, i) => ({ at: bez(t), from: SPREAD[i], front: true })),
+  ...FRONT_T.map((t, i) => {
+    const [x, y] = bez(t);
+    return { at: clampPt(x + BEHIND[i][0], y + BEHIND[i][1]), from: SPREAD[(i + 3) % 7], front: false };
+  }),
+].map((d, i) => {
+  const [sx, sy] = clampPt(d.at[0] + d.from[0], d.at[1] + d.from[1]);
+  return { ...d, i, dx: sx - d.at[0], dy: sy - d.at[1] };
+});
+const pick = bez(FRONT_T[BALANCED]);
+const frontPath = `M ${P0[0]} ${P0[1]} Q ${P1[0]} ${P1[1]} ${P2[0]} ${P2[1]}`;
+---
+
+<svg viewBox="0 0 760 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label={label} class="pr">
+  <defs>
+    <clipPath id="pr-tile"><rect x="40" y="20" width="300" height="260" rx="8" /></clipPath>
+  </defs>
+
+  <!-- Intersection -->
+  <rect x="40" y="20" width="300" height="260" rx="8" class="pr-tile" />
+  <g clip-path="url(#pr-tile)">
+    <g class="pr-blocks">
+      {[[52, 32], [228, 32], [52, 194], [228, 194]].map(([x, y]) => <rect x={x} y={y} width="100" height="74" rx="3" />)}
+    </g>
+    <g class="pr-road">
+      <line x1="0" y1={CY} x2="380" y2={CY} />
+      <line x1={CX} y1="0" x2={CX} y2="300" />
+    </g>
+    <g class="pr-lane">
+      <line x1="40" y1={CY} x2={CX - 22} y2={CY} /><line x1={CX + 22} y1={CY} x2="340" y2={CY} />
+      <line x1={CX} y1="20" x2={CX} y2={CY - 22} /><line x1={CX} y1={CY + 22} x2={CX} y2="280" />
+    </g>
+    <g class="pr-stop">
+      <line x1={CX} y1={CY - 24} x2={CX + 22} y2={CY - 24} />
+      <line x1={CX - 22} y1={CY + 24} x2={CX} y2={CY + 24} />
+      <line x1={CX - 24} y1={CY - 22} x2={CX - 24} y2={CY} />
+      <line x1={CX + 24} y1={CY} x2={CX + 24} y2={CY + 22} />
+    </g>
+    <g class="pr-cars">
+      {cars.map((c) => (
+        <rect class={`pr-car pr-${c.axis}`} style={`--p: path('${c.p}'); --stop: ${c.stop}%`} x="-8" y="-4" width="16" height="8" rx="2" />
+      ))}
+    </g>
+    <g class="pr-sig">
+      {SIGNALS.map((s) => <circle cx={s.x} cy={s.y} r="3.5" class={`pr-${s.axis}`} />)}
+    </g>
+  </g>
+
+  <!-- The nested loop: weights down to the agent, fitness back up -->
+  <g class="pr-loop">
+    <path d="M 410 108 C 392 78, 368 78, 350 108" />
+    <path d="M 350 192 C 368 222, 392 222, 410 192" />
+    <circle r="3" class="pr-token" style="--p: path('M 410 108 C 392 78, 368 78, 350 108')" />
+    <circle r="3" class="pr-token pr-up" style="--p: path('M 350 192 C 368 222, 392 222, 410 192')" />
+  </g>
+
+  <!-- Pareto chart -->
+  <g class="pr-grid">
+    {[0, 1, 2, 3].map((k) => <line x1={O.x} y1={O.y - 52 * (k + 1)} x2="716" y2={O.y - 52 * (k + 1)} />)}
+  </g>
+  <g class="pr-axis">
+    <line x1={O.x} y1="34" x2={O.x} y2={O.y} />
+    <line x1={O.x} y1={O.y} x2="720" y2={O.y} />
+  </g>
+  <path d={frontPath} pathLength="1" class="pr-front" />
+  <g class="pr-pop">
+    {dots.map((d) => (
+      <circle cx={d.at[0]} cy={d.at[1]} r="4" class:list={[d.front && 'pr-on']} style={`--dx:${d.dx}px; --dy:${d.dy}px; --i:${d.i}`} />
+    ))}
+  </g>
+  <circle cx={pick[0]} cy={pick[1]} r="9" class="pr-pick" />
+</svg>
+
+<style>
+  .pr { --T: 8s; --G: 12s; }
+
+  .pr-tile { fill: #fff; stroke: var(--color-wire); stroke-width: 1.5; }
+  .pr-blocks rect { fill: var(--color-canvas); stroke: var(--color-wire); stroke-width: 1; }
+  .pr-road line { stroke: var(--color-wire); stroke-width: 44; }
+  .pr-lane line { stroke: var(--color-ink-muted); stroke-width: 1; stroke-dasharray: 6 8; opacity: 0.45; }
+  .pr-stop line { stroke: var(--color-ink-muted); stroke-width: 2; opacity: 0.6; }
+
+  /* Two phases per cycle: north–south green for the first half, east–west for
+     the second. Opacity only — animating fill repaints the whole SVG. */
+  .pr-sig circle { fill: var(--color-pine); animation: pr-signal var(--T) steps(1, end) infinite; }
+  .pr-sig .pr-ew { animation-delay: calc(var(--T) / -2); }
+  @keyframes pr-signal {
+    0%, 46%  { opacity: 1; }
+    50%, 96% { opacity: 0.2; }
+  }
+
+  /* Cars queue at the stop line on red and leave as a platoon on green. They
+     wrap from the far end back to the start while invisible and off the tile. */
+  .pr-car { display: none; fill: var(--color-ink); }
+  @supports (offset-path: path('M 0 0 H 1')) {
+    .pr-car {
+      display: block;
+      offset-path: var(--p);
+      offset-rotate: auto;
+      offset-distance: var(--stop);
+      animation: pr-go var(--T) ease-in-out infinite;
+    }
+    .pr-ew { animation-delay: calc(var(--T) / -2); }
+  }
+  @keyframes pr-go {
+    0%, 4%   { offset-distance: var(--stop); opacity: 1; }
+    42%      { offset-distance: 100%; opacity: 1; }
+    43%, 48% { offset-distance: 0%; opacity: 0; }
+    50%      { offset-distance: 0%; opacity: 1; }
+    82%, 100%{ offset-distance: var(--stop); opacity: 1; }
+  }
+
+  .pr-loop path { fill: none; stroke: var(--color-ink-muted); stroke-width: 1.5; stroke-dasharray: 3 4; opacity: 0.5; }
+  .pr-token { display: none; fill: var(--color-pine); }
+  @supports (offset-path: path('M 0 0 H 1')) {
+    .pr-token {
+      display: block;
+      offset-path: var(--p);
+      animation: pr-token calc(var(--G) / 4) ease-in-out infinite;
+    }
+    .pr-up { animation-delay: calc(var(--G) / -8); }
+  }
+  @keyframes pr-token {
+    0%       { offset-distance: 0%; opacity: 0; }
+    15%      { opacity: 1; }
+    85%      { opacity: 1; }
+    100%     { offset-distance: 100%; opacity: 0; }
+  }
+
+  .pr-grid line { stroke: var(--color-wire); stroke-width: 1; stroke-dasharray: 4 6; }
+  .pr-axis line { stroke: var(--color-ink-muted); stroke-width: 1.5; opacity: 0.6; }
+
+  /* Generations: the population starts scattered up and right and steps down
+     onto the front, then the front is traced and the balanced policy picked. */
+  .pr-pop circle {
+    fill: var(--color-ink-muted);
+    animation: pr-evolve var(--G) cubic-bezier(.3, .7, .3, 1) infinite;
+  }
+  .pr-pop .pr-on { fill: var(--color-pine); }
+  @keyframes pr-evolve {
+    0%       { transform: translate(var(--dx), var(--dy)); opacity: 0; }
+    6%       { transform: translate(var(--dx), var(--dy)); opacity: 0.7; }
+    20%      { transform: translate(calc(var(--dx) * 0.55), calc(var(--dy) * 0.55)); }
+    34%      { transform: translate(calc(var(--dx) * 0.22), calc(var(--dy) * 0.22)); }
+    48%, 92% { transform: translate(0, 0); opacity: 0.9; }
+    100%     { transform: translate(0, 0); opacity: 0; }
+  }
+
+  .pr-front {
+    fill: none; stroke: var(--color-pine); stroke-width: 1.5; opacity: 0.6;
+    stroke-dasharray: 1; stroke-dashoffset: 1;
+    animation: pr-trace var(--G) ease-out infinite;
+  }
+  @keyframes pr-trace {
+    0%, 50%  { stroke-dashoffset: 1; opacity: 0.6; }
+    64%, 92% { stroke-dashoffset: 0; opacity: 0.6; }
+    100%     { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  .pr-pick {
+    fill: none; stroke: var(--color-pine); stroke-width: 2;
+    transform-box: fill-box; transform-origin: center;
+    opacity: 0;
+    animation: pr-pick var(--G) ease-out infinite;
+  }
+  @keyframes pr-pick {
+    0%, 64%  { opacity: 0; transform: scale(2); }
+    70%      { opacity: 1; transform: scale(1); }
+    80%      { transform: scale(1.25); }
+    88%, 92% { opacity: 1; transform: scale(1); }
+    100%     { opacity: 0; }
+  }
+</style>
