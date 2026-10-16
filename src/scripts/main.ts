@@ -305,7 +305,20 @@ function initHeroShader() {
 document.addEventListener('astro:before-swap', () => {
   shaderCleanup?.();
   shaderCleanup = null;
+  buddyCleanup?.();
+  buddyCleanup = undefined;
 });
+
+// The Bug Hunt player in the project grid's spare slot. Loaded only on pages
+// that have the grid, so the sprites stay out of every other page.
+let buddyCleanup: (() => void) | undefined;
+function initBuddy() {
+  if (!document.querySelector('[data-buddy-zone]')) return;
+  import('./buddy').then((m) => {
+    buddyCleanup?.();
+    buddyCleanup = m.initBuddy();
+  });
+}
 
 // Document-level listener: survives view transitions, so it's bound once.
 initEasterEgg();
@@ -319,4 +332,5 @@ document.addEventListener('astro:page-load', () => {
   initGridHoverVideos();
   initAnimatedThumbs();
   initTimeline();
+  initBuddy();
 });

@@ -34,7 +34,7 @@ await Promise.all(
 );
 ---
 
-<section class="px-6 md:px-10 lg:px-16 py-16 max-w-[1280px] mx-auto">
+<section class="relative px-6 md:px-10 lg:px-16 py-16 max-w-[1280px] mx-auto" data-buddy-zone>
   <div class="flex items-baseline justify-between mb-0">
     <h2 class="font-display text-2xl text-ink">Selected Work</h2>
     <span class="font-mono text-xs text-ink-muted">
@@ -81,9 +81,25 @@ await Promise.all(
         </article>
       );
     })}
+    {visible.length % 2 === 1 && (
+      // The odd slot out: the Bug Hunt player stands here (see scripts/buddy.ts).
+      <div class="relative min-h-[220px] md:min-h-[260px]" data-buddy-home aria-hidden="true">
+        <p class="buddy-hint absolute inset-x-0 top-[160px] md:top-[186px] font-mono text-xs text-ink-muted text-center" data-buddy-hint>
+          psst, click me
+        </p>
+      </div>
+    )}
   </div>
+
+  <canvas data-buddy class="buddy pointer-events-none absolute left-0 top-0 z-10" aria-hidden="true"></canvas>
 
   <p class="font-mono text-xs text-ink-muted text-center pt-12">
     More coming soon — still writing them up 😅
   </p>
 </section>
+
+<style>
+  .buddy { image-rendering: pixelated; }
+  .buddy-hint { transition: opacity 0.4s ease; }
+  .buddy-hint[data-gone] { opacity: 0; }
+</style>
