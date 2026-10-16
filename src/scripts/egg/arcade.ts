@@ -331,7 +331,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   function gameOver(r: RunResult) {
     pending = r.score > 0 ? r : null;
     $('[data-over-kicker]').textContent = r.won ? 'You won' : r.record ? 'New best' : 'Game over';
-    $('[data-over-title]').textContent = r.won ? 'B1 is clear.' : `Fell on ${r.floor === 'G' ? 'the ground floor' : r.floor}, round ${r.round}.`;
+    $('[data-over-title]').textContent = r.won ? 'You got out.' : `Fell on ${r.floor === 'G' ? 'the ground floor' : r.floor}, round ${r.round}.`;
     $('[data-over-copy]').textContent = `Score ${r.score.toLocaleString()} in ${clock(r.time, true)} · best ${r.best.toLocaleString()}`;
     nameForm.hidden = !pending;
     nameInput.value = lastName();

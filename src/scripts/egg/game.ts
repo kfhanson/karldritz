@@ -1,10 +1,11 @@
-// Bug Hunt — a 2.5D survival arena. One office floor seen from a three-quarter
-// view; bugs come in through the lifts in the back wall and the side doors,
-// round after round, each round bigger and every fifth with a boss. Round
-// 10's boss, the Root Bug, smashes the floor at half health and the fight
-// drops to B1, the server room below, where the run carries on until round
-// 20's boss, the Daemon: beat it and the run is won. Move with WASD, aim at
-// the cursor, dash out of trouble.
+// Bug Hunt — a 2.5D survival arena. An office tower seen a floor at a time
+// from a three-quarter view, from 10F down a floor a round; bugs come in
+// through the lifts in the back wall and the side doors, each round bigger
+// and every fifth with a boss. Round 10's boss, the Root Bug, smashes the
+// lobby floor at half health and the fight drops to B1, the server room
+// below, where the run carries on until round 20's boss, the Daemon: beat it,
+// get out before B1 goes up, and the run is won. Move with WASD, aim at the
+// cursor, dash out of trouble.
 //
 // The world is the floor plane in pixels; things with height (flyers, bullets,
 // sparks) carry a z and are drawn that far up the screen, with a shadow on
@@ -13,12 +14,16 @@
 //
 // This file is the game itself: rounds, the player, the bugs, the fall
 // between floors, and drawing the scene. The room and its physics are in
-// world.ts, each floor's look and furniture in floors/, and the quake's
-// shapes in quake.ts.
+// world.ts, each floor's look and furniture in floors/, the quake's shapes
+// in quake.ts and the way out's in ending.ts.
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
 import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW } from './people';
 import { B1, drawProp, FLOORS } from './floors';
+import {
+  BLAST, BOOM_LIFE, BREACH, CHEER, disc, drawBoom, drawHole, EXIT, FLASH, GROUND, HOLES, newEnding, paintStreet, ragged,
+  STOP, TOWER, type Ending,
+} from './ending';
 import { BREAK, crackReach, DEPTH, FALL_G, paintCracks, SLAM, TILE_H, TILE_W, tileAt, type Faller, type Quake, type Rubble, type Tile } from './quake';
 import {
   ARENA, blocked, clamp, collide, DOORS, FLOOR_TOP, FRONT, len, PROPS, prune, rand, setProps, SHADOW, SIDE, Sparks, stopsShot,
@@ -275,6 +280,8 @@ export class Game {
   private beam: Beam | null = null;
   private quake: Quake | null = null;
   private descent: { t: number; from: number; swapped: boolean } | null = null; // the lift down a floor
+  private ending: Ending | null = null; // the way out, once the Daemon is down
+  private hero: Player | null = null; // still drawn on the street after the result is up
   private barLag = 1; // the boss bar's trailing chunk, as a fraction
   // Scratch vectors for the bugs' steering, which runs for every bug every
   // tick. Each is read straight after it's written, never kept.
@@ -341,6 +348,8 @@ export class Game {
     this.resetDoors();
     this.score = 0;
     this.ticks = 0;
+    this.ending = null;
+    this.hero = null;
     this.combo = 0;
     this.comboT = 0;
     this.deadT = 0;
@@ -374,6 +383,8 @@ export class Game {
   attract() {
     this.mode = 'attract';
     this.player = null;
+    this.ending = null;
+    this.hero = null;
     this.enemies = [];
     this.bullets = [];
     this.pickups = [];
@@ -463,6 +474,14 @@ export class Game {
       this.updateQuake(this.quake, dt);
       this.updateFx(dt);
       this.updateBar(dt);
+      this.pushHud();
+      return;
+    }
+    if (this.ending) {
+      // And the way out.
+      this.updateEnding(this.ending, dt);
+      this.updateFx(dt);
+      prune(this.enemies, alive);
       this.pushHud();
       return;
     }
@@ -560,10 +579,6 @@ export class Game {
       return;
     }
     this.phaseT -= dt;
-    if (this.phase === 'won') {
-      if (this.phaseT <= 0) this.gameOver(true);
-      return;
-    }
     if (this.phase === 'intro' && this.phaseT <= 0) this.phase = 'fight';
     else if (this.phase === 'fight') {
       const maxAlive = Math.min(18, 6 + danger(this.round));
@@ -860,6 +875,7 @@ export class Game {
   }
 
   private aimDir(p: Player): { x: number; y: number } {
+    if (this.ending) return { x: p.lx, y: p.ly }; // a cutscene: the gun goes where they look
     const g = this.gun(p);
     let tx: number | null = null;
     let ty = 0;
@@ -1662,10 +1678,10 @@ export class Game {
   }
 
   // The Daemon is down, and the run is won. Everything it was running goes
-  // with it; a moment to take it in, then the result.
+  // with it, and then B1 does: the way out plays from here.
   private win(e: Enemy) {
     this.phase = 'won';
-    this.phaseT = 3.2;
+    this.ending = newEnding();
     this.beam = null;
     this.spit = [];
     this.waves = [];
@@ -1681,6 +1697,251 @@ export class Game {
     [1760, 1320, 990, 660, 440].forEach((f, i) => tone(f, f * 0.5, 0.18, 0.08, 'square', i * 0.09));
     [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.08, 'triangle', 0.9 + i * 0.12));
     this.banner('Daemon terminated', 'B1 is clear');
+  }
+
+  // ── The way out ──
+  private updateEnding(e: Ending, dt: number) {
+    e.t += dt;
+    for (const b of e.booms) b.t += dt;
+    prune(e.booms, (b) => b.t < BOOM_LIFE);
+    if (e.stage === 'out') return this.updateStreet(e, dt);
+    const p = this.player!;
+    if (e.stage === 'cheer') {
+      if (e.t >= CHEER) this.stage(e, 'blast');
+      return;
+    }
+    // B1 going up round them, faster once the wall's gone.
+    e.next -= dt;
+    if (e.next <= 0) {
+      e.next = e.stage === 'blast' ? rand(0.22, 0.4) : rand(0.15, 0.3);
+      this.blowB1(e, p);
+    }
+    this.shake(1.5, 0.1);
+    if (e.stage === 'blast') {
+      if (e.t >= BLAST) this.breach(e, p);
+    } else if (e.stage === 'run') {
+      // To the hole, round the furniture (straight through it, if that's
+      // taking too long).
+      if (this.walkTo(p, e.hole, ARENA.y0 + 3, dt, e.t < 4)) this.stage(e, 'exit');
+    } else {
+      // Up the ramp into the light, and the screen goes white.
+      p.vx = 0;
+      p.vy = -30;
+      p.y -= 30 * dt;
+      p.lx = 0;
+      p.ly = -1;
+      p.anim += 30 * dt;
+      if (e.t >= EXIT + FLASH) this.goOutside(e, p);
+    }
+  }
+
+  private stage(e: Ending, s: Ending['stage']) {
+    e.stage = s;
+    e.t = 0;
+  }
+
+  // Walk a body to a point as the bugs do, sliding round furniture. True on arrival.
+  private walkTo(p: Player, tx: number, ty: number, dt: number, solid: boolean) {
+    const d = len(tx - p.x, ty - p.y);
+    if (d < 2) {
+      p.vx = p.vy = 0;
+      return true;
+    }
+    let a = Math.atan2(ty - p.y, tx - p.x);
+    if (solid && d > 8) {
+      for (const off of STEER_FAN) {
+        const t = a + off;
+        if (!blocked(p.x + Math.cos(t) * 8, p.y + Math.sin(t) * 8, p.r)) {
+          a = t;
+          break;
+        }
+      }
+    }
+    const sp = Math.min(SPEED * 1.15, d * 8);
+    p.vx = Math.cos(a) * sp;
+    p.vy = Math.sin(a) * sp;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    if (solid) collide(p);
+    p.lx = Math.cos(a);
+    p.ly = Math.sin(a);
+    p.anim += sp * dt;
+    return false;
+  }
+
+  // An explosion somewhere in B1, mostly in the server racks, never on top of the player.
+  private blowB1(e: Ending, p: Player) {
+    const racks = PROPS.filter((pr) => pr.stopsShots);
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let i = 0; i < 6; i++) {
+      const pr = Math.random() < 0.6 ? racks[Math.floor(Math.random() * racks.length)] : null;
+      x = pr ? pr.x + rand(0, pr.w) : rand(ARENA.x0 + 8, ARENA.x1 - 8);
+      y = pr ? pr.y + pr.h : rand(ARENA.y0 + 6, ARENA.y1 - 4);
+      z = pr ? rand(6, pr.height) : rand(0, 14);
+      if (len(x - p.x, y - p.y) > 28) break;
+    }
+    e.booms.push({ x, y, z, r: rand(7, 13), t: 0 });
+    this.puff(x, y, 10, PAL.y, z);
+    this.puff(x, y, 6, PAL.r, z);
+    // Bits of ceiling coming down.
+    for (let i = 0; i < 4; i++) {
+      this.sparks.add(rand(ARENA.x0, ARENA.x1), rand(ARENA.y0, ARENA.y1), rand(60, 110), rand(-10, 10), rand(-6, 6), -20, 1.4, i % 2 ? '#8A8D86' : '#5D605B');
+    }
+    this.shake(4, 0.25);
+    burst(0.35, rand(140, 320), 0.45, 'lowpass');
+  }
+
+  // The big one: the back wall blows out nearest the player.
+  private breach(e: Ending, p: Player) {
+    let best = Infinity;
+    for (const x of HOLES) if (Math.abs(x - p.x) < best) (best = Math.abs(x - p.x)), (e.hole = x);
+    e.edge = ragged();
+    e.booms.push({ x: e.hole, y: FLOOR_TOP + 2, z: 12, r: 22, t: 0 });
+    for (let i = 0; i < 40; i++) {
+      this.sparks.add(e.hole + rand(-12, 12), FLOOR_TOP + 2, rand(4, 22), rand(-80, 80), rand(20, 110), rand(40, 140), rand(0.6, 1.2), i % 3 ? '#8A8D86' : '#B4B7AF');
+    }
+    this.shake(10, 0.6);
+    burst(0.9, 120, 0.8, 'lowpass');
+    tone(80, 30, 0.8, 0.16, 'sawtooth');
+    this.banner('Get out!', 'The building is coming down');
+    this.stage(e, 'run');
+  }
+
+  // Cut to the street: out of the breach at the tower's foot.
+  private goOutside(e: Ending, p: Player) {
+    this.stage(e, 'out');
+    e.booms = [];
+    e.fires = [];
+    e.street = paintStreet(e.fires);
+    e.next = 0.4;
+    e.strays = Array.from({ length: 7 }, () => {
+      const flyer = Math.random() < 0.3;
+      return { x: rand(0, VIEW_W), y: rand(GROUND + 22, VIEW_H - 6), vx: (Math.random() < 0.5 ? -1 : 1) * rand(24, 60), flyer, t: rand(0, 10) };
+    });
+    this.sparks.clear();
+    this.lower.clear();
+    this.hero = p;
+    Object.assign(p, { x: BREACH.x, y: BREACH.y, vx: 0, vy: 0, lx: 0, ly: 1, dash: 0, kick: 0, inv: 0, hurt: 0 });
+    burst(0.6, 200, 0.5, 'lowpass');
+  }
+
+  private updateStreet(e: Ending, dt: number) {
+    const p = this.hero!;
+    // Out, down to the road, then a look back at the tower.
+    if (e.t < 1.6) this.walkTo(p, 160, 150, dt, false);
+    else p.vx = p.vy = 0;
+    if (e.t >= 1.9) (p.lx = 0), (p.ly = -1);
+    if (e.t >= STOP && !e.over) {
+      e.over = true;
+      this.gameOver(true);
+    }
+    const loud = e.t < STOP + 4; // the sound dies away behind the result
+    // A siren, two notes.
+    if (loud && Math.floor(e.t / 0.55) !== Math.floor((e.t - dt) / 0.55)) {
+      const f = Math.floor(e.t / 0.55) % 2 ? 880 : 660;
+      tone(f, f, 0.5, 0.012, 'sine');
+    }
+    // Windows blowing out up the tower, glass and concrete raining down.
+    e.next -= dt;
+    if (e.next <= 0) {
+      e.next = rand(0.35, 0.8);
+      const [wx, wy] = e.fires.length && Math.random() < 0.7 ? e.fires[Math.floor(Math.random() * e.fires.length)] : [rand(TOWER.x0 + 6, TOWER.x1 - 14), rand(6, 70)];
+      const z = GROUND - wy;
+      e.booms.push({ x: wx + 4, y: GROUND, z, r: rand(6, 11), t: 0 });
+      for (let i = 0; i < 10; i++) {
+        this.sparks.add(wx + 4, GROUND + rand(2, 13), z, rand(-30, 30), rand(0, 12), rand(0, 40), 1.8, ['#8A8D86', '#CFE0E6', '#B4B7AF'][i % 3]);
+      }
+      this.shake(2, 0.2);
+      if (loud) burst(0.3, rand(160, 300), 0.25, 'lowpass');
+    }
+    // Smoke from the fires and the roof, drifting off.
+    if (e.smoke.length < 70 && Math.random() < 0.4) {
+      const [fx, fy] = e.fires.length && Math.random() < 0.6 ? e.fires[Math.floor(Math.random() * e.fires.length)] : [rand(TOWER.x0, TOWER.x1), 0];
+      e.smoke.push({ x: fx + 4, y: fy, r: rand(2, 4), vx: rand(3, 10), t: 0 });
+    }
+    for (const s of e.smoke) {
+      s.t += dt;
+      s.y -= 16 * dt;
+      s.x += s.vx * dt;
+      s.r += 2.2 * dt;
+    }
+    prune(e.smoke, (s) => s.y > -s.r && s.t < 5);
+    for (const b of e.strays) {
+      b.t += dt;
+      b.x += b.vx * dt;
+      if (b.x < -12) b.x = VIEW_W + 10;
+      if (b.x > VIEW_W + 12) b.x = -10;
+    }
+  }
+
+  // Outside: the street, then the fire, smoke, lights and everyone on it.
+  private renderOutside(e: Ending) {
+    const c = this.ctx;
+    const t = this.time;
+    c.drawImage(e.street!, 0, 0);
+    for (const s of e.smoke) disc(c, s.x, s.y, s.r, s.t < 2 ? 'rgba(46,38,38,0.5)' : 'rgba(90,76,72,0.32)', 1);
+    for (const [x, y] of e.fires) {
+      const f = (Math.sin(t * 9 + x * 1.7 + y) + 1) / 2;
+      c.fillStyle = f > 0.6 ? '#FFF4D6' : f > 0.3 ? PAL.y : PAL.r;
+      c.fillRect(x + 1, y + 2, 6, 5);
+      c.fillStyle = PAL.r;
+      c.fillRect(x + 1 + (Math.floor(t * 10 + x) % 4), y - 1 - Math.round(f * 2), 3, 2);
+    }
+    // The wreck on fire.
+    for (let i = 0; i < 6; i++) {
+      const h = 3 + Math.round((Math.sin(t * 12 + i * 2.1) + 1) * 3);
+      c.fillStyle = PAL.r;
+      c.fillRect(25 + i * 7, 150 - h, 4, h);
+      c.fillStyle = PAL.y;
+      c.fillRect(26 + i * 7, 151 - Math.ceil(h / 2), 2, Math.ceil(h / 2));
+    }
+    // Police lights, and their colour thrown across the road.
+    const blue = Math.floor(t * 4) % 2 === 0;
+    c.fillStyle = blue ? 'rgba(62,95,138,0.22)' : 'rgba(196,83,47,0.2)';
+    for (let y = -10; y <= 10; y++) {
+      const half = Math.round(48 * Math.sqrt(1 - (y / 10) ** 2));
+      c.fillRect(275 - half, 162 + y, half * 2, 1);
+    }
+    c.fillStyle = blue ? '#5B8BD0' : '#2A3550';
+    c.fillRect(268, 141, 7, 2);
+    c.fillStyle = blue ? '#5A2418' : '#F05A3A';
+    c.fillRect(276, 141, 7, 2);
+
+    // The bugs that got out, and the one who did, back to front.
+    const sp = this.sprites;
+    const p = this.player ?? this.hero!;
+    let drawn = false;
+    const strays = e.strays.slice().sort((a, b) => a.y - b.y);
+    for (const b of strays) {
+      if (!drawn && b.y > p.y) {
+        this.shadow(p.x, p.y, 4);
+        this.drawPlayer(p);
+        drawn = true;
+      }
+      const s = b.flyer ? sp.flyer[Math.floor(b.t * 10) % 2] : sp.crawler[Math.floor(b.t * 8) % 2];
+      const z = b.flyer ? 10 + Math.sin(b.t * 5) * 2 : 0;
+      this.shadow(b.x, b.y, 4, z);
+      this.draw(s, b.x - s.w / 2, b.y - z - s.h + 1, b.vx < 0 ? -1 : 1);
+    }
+    if (!drawn) {
+      this.shadow(p.x, p.y, 4);
+      this.drawPlayer(p);
+    }
+    this.sparks.draw(c, this.frameNo++);
+    for (const b of e.booms) drawBoom(c, b);
+    // The glow of it all, flickering.
+    c.fillStyle = `rgba(217,128,63,${(0.03 + Math.random() * 0.04).toFixed(3)})`;
+    c.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+
+  // White, as they step out into the light, and back from white outside.
+  private drawFlash(e: Ending) {
+    const a = e.stage === 'exit' ? clamp((e.t - EXIT) / FLASH, 0, 1) : e.stage === 'out' ? clamp(1 - e.t / 0.5, 0, 1) : 0;
+    if (a <= 0) return;
+    this.ctx.fillStyle = `rgba(255,251,239,${a.toFixed(3)})`;
+    this.ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
 
   private mult() {
@@ -1935,7 +2196,7 @@ export class Game {
 
   private drawPlayer(p: Player) {
     const c = this.ctx;
-    const won = this.phase === 'won';
+    const won = this.ending?.stage === 'cheer';
     // Body: one of eight views, from where it's looking (at the camera, once
     // the run is won).
     const lx = won ? 0 : p.lx;
@@ -2031,7 +2292,9 @@ export class Game {
       c.translate(Math.round(rand(-k, k)), Math.round(rand(-k, k)));
     }
     const q = this.quake;
-    if (q && q.t >= BREAK) this.renderFall(q);
+    const e = this.ending;
+    if (e?.stage === 'out') this.renderOutside(e);
+    else if (q && q.t >= BREAK) this.renderFall(q);
     else {
       c.drawImage(this.room(this.floor), 0, 0);
       if (q && q.t >= SLAM) {
@@ -2045,9 +2308,12 @@ export class Game {
         c.restore();
       }
       this.drawDoors(this.floor);
+      if (e?.hole) drawHole(c, e);
       this.drawScene();
+      if (e) for (const b of e.booms) drawBoom(c, b);
     }
     c.restore();
+    if (e) this.drawFlash(e);
     if (this.descent) this.drawDescent(this.descent);
     this.drawBossBar();
   }
@@ -2097,7 +2363,14 @@ export class Game {
       if (it.kind === 0) drawProp(this.ctx, it.ref as Prop, this.time);
       else if (it.kind === 1) this.drawPickup(it.ref as Pickup);
       else if (it.kind === 2) this.drawEnemy(it.ref as Enemy);
-      else if (it.kind === 3) this.drawPlayer(it.ref as Player);
+      else if (it.kind === 3) {
+        // Fading into the hole on the way out.
+        const e = this.ending;
+        c.save();
+        if (e?.stage === 'exit') c.globalAlpha = clamp(1 - e.t / EXIT, 0, 1);
+        this.drawPlayer(it.ref as Player);
+        c.restore();
+      }
       else this.drawFallen(it.ref as Player);
     }
 
@@ -2330,7 +2603,7 @@ export class Game {
   // out and the Daemon overclocks.
   private drawBossBar() {
     const k = this.headliner();
-    if (!k || this.mode === 'attract') return;
+    if (!k || this.mode === 'attract' || this.ending) return;
     const c = this.ctx;
     const w = 120;
     const x = Math.round((VIEW_W - w) / 2);
