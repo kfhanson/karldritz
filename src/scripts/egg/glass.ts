@@ -562,7 +562,7 @@ function warmGL() {
 /** Second click: nothing to see yet, but get the expensive bits going. */
 export function warm(settled: number) {
   arcadeModule ??= import('./arcade');
-  arcadeModule.then((m) => m.preloadType());
+  arcadeModule.then((m) => (m.preloadType(), m.warmKit()));
   import('./snapshot');
   import('./shards3d');
   // The slow work starts as soon as the page is still — ideally before the
@@ -576,9 +576,23 @@ export function warm(settled: number) {
 // so the crack gets painted before either starts.
 const afterPaint = (fn: () => void, delay = 0) => requestAnimationFrame(() => setTimeout(fn, delay));
 
+// The three shards that stay behind as the menu, for this web at this
+// window size. Picked ahead, in an idle moment once the crack's woven:
+// it's a few dozen milliseconds the shatter can't spare.
+let menuPick: { web: Web; w: number; h: number; keep: number[] } | null = null;
+function pickMenu(m: typeof import('./shards3d')): number[] {
+  if (!web) return [];
+  if (menuPick?.web !== web || menuPick.w !== innerWidth || menuPick.h !== innerHeight) {
+    menuPick = { web, w: innerWidth, h: innerHeight, keep: menuShards(web.cells, m.clipToView, m.inscribed) };
+  }
+  return menuPick.keep;
+}
+const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 1000 }) : setTimeout(f, 50));
+
 export function crack(hit: number, at: Pt) {
   ensureLayer();
   if (!web) web = weave(at);
+  if (menuPick?.web !== web) import('./shards3d').then((m) => idle(() => pickMenu(m)));
   if (healing) {
     // Struck again mid-heal: the crack stops receding and runs back out.
     const h = healing;
@@ -660,8 +674,9 @@ export async function shatter(at: Pt): Promise<void> {
 
   // Prefer real 3D; without WebGL, the flat 2D fall. Three good shards stay
   // behind to become the menu.
-  const { create3D, clipToView, inscribed } = await import('./shards3d');
-  const keep = menuShards(web!.cells, clipToView, inscribed);
+  const shards3d = await import('./shards3d');
+  const { create3D, clipToView } = shards3d;
+  const keep = pickMenu(shards3d);
   const scene = create3D(layer!, snap, web!.cells.filter((_, i) => !keep.includes(i)), web!.o, web!.R);
   const shards = scene ? [] : cut(snap, sx);
   if (scene) scene.rest();

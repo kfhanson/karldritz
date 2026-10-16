@@ -159,6 +159,8 @@ const TYPE_CSS = 'https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@40
 
 /** Fetch the pixel faces ahead of time: the menu's glass labels are drawn on
  * the frame the page breaks, too soon to wait for them. */
+export { warmKit } from './game';
+
 export function preloadType() {
   if (document.querySelector('link[data-egg-type]')) return;
   const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: TYPE_CSS });
@@ -367,12 +369,20 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
 
   // ── Between rounds: the shop site, the vending machine, the weapon crate ──
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
-  // Pixel art as an <img>, drawn at a whole multiple so it stays crisp.
-  const pics = new Map<HTMLCanvasElement, string>();
-  const pic = (c: HTMLCanvasElement, k: number) => {
-    let src = pics.get(c);
-    if (!src) pics.set(c, (src = c.toDataURL()));
-    return `<img class="ea-pic" src="${src}" width="${c.width * k}" height="${c.height * k}" alt="">`;
+  // Pixel art in the markup: a placeholder now, a copy of the canvas once the
+  // markup's in (fillPics), scaled a whole multiple by CSS so it stays crisp.
+  // Not toDataURL: reading a canvas back waits on the GPU, which cost a
+  // sixth of a second when the arcade first opened, mid-shatter.
+  let picQueue: HTMLCanvasElement[] = [];
+  const pic = (c: HTMLCanvasElement, k: number) =>
+    `<canvas class="ea-pic" data-pic="${picQueue.push(c) - 1}" width="${c.width}" height="${c.height}" style="--w:${c.width * k}px;--h:${c.height * k}px" aria-hidden="true"></canvas>`;
+  const fillPics = (root: ParentNode) => {
+    root.querySelectorAll<HTMLCanvasElement>('canvas[data-pic]').forEach((el) => {
+      const src = picQueue[Number(el.dataset.pic)];
+      if (src) el.getContext('2d')!.drawImage(src, 0, 0);
+      el.removeAttribute('data-pic');
+    });
+    picQueue = [];
   };
   // A made-up but steady rating for each thing in the shop.
   const rating = (id: string) => {
@@ -380,7 +390,6 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
     for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
     return { stars: 4 + (h % 3 === 0 ? 1 : 0), reviews: 40 + (h % 960) };
   };
-  const coinPic = pic(HUD_COIN(), 2);
   let offerKeys: (() => void)[] = [];
   function openOffer(o: Offer) {
     const body = $('[data-offer-body]');
@@ -414,7 +423,7 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
           `<button type="button" class="ea-site-close" data-offer-leave>Close tab <kbd>Esc</kbd></button></div>` +
           `<div class="ea-site-head"><strong class="ea-site-logo">Bug<span>Mart</span></strong>` +
           `<span class="ea-site-search" aria-hidden="true">Search for gear…</span>` +
-          `<span class="ea-site-wallet">${coinPic}<b data-wallet></b> chips</span></div>` +
+          `<span class="ea-site-wallet">${pic(coin, 2)}<b data-wallet></b> chips</span></div>` +
           `<p class="ea-site-deal">Delivered before the next round · Prices rise with every order</p>` +
           `<div class="ea-site-grid" data-cards>${wares
             .map((w, i) => {
@@ -459,11 +468,12 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       offerKeys = wares.map((w, i) => () => {
         if (sold.has(i) || !game.buy(w)) return;
         sold.add(i);
-        if (tray) tray.innerHTML = `${pic(wareIcon(w.icon), 3)}<span>${esc(w.name)}</span>`;
+        if (tray) (tray.innerHTML = `${pic(wareIcon(w.icon), 3)}<span>${esc(w.name)}</span>`), fillPics(tray);
         paint();
       });
       paint();
     }
+    fillPics(body);
     body.onclick = (e) => {
       const t = e.target as Element;
       const b = t.closest<HTMLButtonElement>('[data-card]');

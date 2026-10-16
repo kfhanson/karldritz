@@ -771,6 +771,8 @@
 }
 .ea-pic {
   display: block;
+  width: var(--w);
+  height: var(--h);
   image-rendering: pixelated;
 }
 .ea-gun .ea-pic {

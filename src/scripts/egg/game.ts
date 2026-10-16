@@ -18,7 +18,7 @@
 // in quake.ts and the way out's in ending.ts.
 import { burst, tone } from './audio';
 import { buildSprites, drawText, PAL, type Sprite, type Sprites } from './sprites';
-import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW } from './people';
+import { buildGuns, buildPerson, GUN_ANGLES, PEOPLE, PERSON_SHOULDER, PERSON_VIEW, type Person } from './people';
 import { B1, drawProp, FLOORS } from './floors';
 import {
   BLAST, BOOM_LIFE, BREACH, CHEER, disc, drawBoom, drawHole, EXIT, FLASH, GROUND, HOLES, newEnding, paintStreet, ragged,
@@ -262,6 +262,29 @@ function turn(a: number, b: number, max: number) {
   return a + clamp(Math.atan2(Math.sin(b - a), Math.cos(b - a)), -max, max);
 }
 
+// The sprites, the player's frames and the guns: built once, shared by every
+// game. warmKit() builds them ahead in idle moments (between the clicks on
+// the logo), so the arcade opening mid-shatter doesn't stall on them.
+let kitSprites: Sprites | undefined;
+let kitPerson: Person | undefined;
+let kitGuns: ReturnType<typeof buildGuns> | undefined;
+const kit = {
+  sprites: () => (kitSprites ??= buildSprites()),
+  person: () => (kitPerson ??= buildPerson()),
+  guns: () => (kitGuns ??= buildGuns()),
+};
+const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 1000 }) : setTimeout(f, 50));
+
+/** Build the game's art ahead of time, a piece per idle moment. */
+export function warmKit() {
+  const steps = [kit.sprites, kit.person, kit.guns];
+  const next = () => {
+    steps.shift()?.();
+    if (steps.length) idle(next);
+  };
+  idle(next);
+}
+
 function loadBest(): number {
   try {
     return Number(localStorage.getItem('egg-best')) || 0;
@@ -274,9 +297,9 @@ export class Game {
   mode: 'attract' | 'play' | 'paused' | 'over' | 'offer' = 'attract';
 
   private ctx: CanvasRenderingContext2D;
-  private sprites: Sprites = buildSprites();
-  private person = buildPerson();
-  private guns = buildGuns();
+  private sprites = kit.sprites();
+  private person = kit.person();
+  private guns = kit.guns();
   private floor = 0; // index into FLOORS: 10F first, B1 last
   private rooms: (HTMLCanvasElement | undefined)[] = []; // painted when first needed
   private raf = 0;
