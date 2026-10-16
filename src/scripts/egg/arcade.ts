@@ -6,7 +6,7 @@ import { isMuted, setMuted } from './audio';
 import { Game, VIEW_H, VIEW_W, type Action, type Hud, type Offer, type RunResult } from './game';
 import { clock, lastName, NAME_MAX, saveRun, topRuns, type Entry } from './leaderboard';
 import { WEAPONS } from './upgrades';
-import { HUD_COIN, pixelLine } from './sprites';
+import { HUD_COIN, pixelLine, wareIcon } from './sprites';
 import { gunIcon } from './people';
 import { createShardMenu, type ShardMenu, type ShardSource } from './shardmenu';
 
@@ -84,6 +84,7 @@ const TEMPLATE = `
             <li><span>Mouse</span> aim, click to shoot</li>
             <li><span><kbd>Space</kbd></span> dash, untouchable for a moment</li>
             <li><span>Pickups</span> hearts heal, bolts fire faster</li>
+            <li><span>Chips</span> spend them at the shop and vending machine between rounds</li>
             <li><span>Combos</span> quick kills multiply score, up to ×5</li>
             <li><span>Round 20</span> beat the boss to win, then sign the leaderboard</li>
           </ul>
@@ -93,11 +94,7 @@ const TEMPLATE = `
         </section>
 
         <section class="ea-screen ea-offer" data-screen="offer" hidden>
-          <p class="ea-eyebrow" data-offer-kicker></p>
-          <h3 data-offer-title></h3>
-          <p class="ea-copy" data-offer-copy></p>
-          <div class="ea-cards" data-offer-cards></div>
-          <div class="ea-menu ea-menu-row" data-offer-actions></div>
+          <div class="ea-offer-body" data-offer-body></div>
         </section>
 
         <section class="ea-screen" data-screen="paused" hidden>
@@ -368,86 +365,114 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
   // takes focus: only fresh presses type.
   nameInput.addEventListener('keydown', (e) => e.repeat && e.key.length === 1 && e.preventDefault());
 
-  // ── Lift offers: shop, power-up, weapon, repair ──
+  // ── Between rounds: the shop site, the vending machine, the weapon crate ──
   const esc = (t: string) => t.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+  // Pixel art as an <img>, drawn at a whole multiple so it stays crisp.
+  const pics = new Map<HTMLCanvasElement, string>();
+  const pic = (c: HTMLCanvasElement, k: number) => {
+    let src = pics.get(c);
+    if (!src) pics.set(c, (src = c.toDataURL()));
+    return `<img class="ea-pic" src="${src}" width="${c.width * k}" height="${c.height * k}" alt="">`;
+  };
+  // A made-up but steady rating for each thing in the shop.
+  const rating = (id: string) => {
+    let h = 7;
+    for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return { stars: 4 + (h % 3 === 0 ? 1 : 0), reviews: 40 + (h % 960) };
+  };
+  const coinPic = pic(HUD_COIN(), 2);
   let offerKeys: (() => void)[] = [];
   function openOffer(o: Offer) {
-    const kicker = $('[data-offer-kicker]');
-    const title = $('[data-offer-title]');
-    const copy = $('[data-offer-copy]');
-    const cards = $('[data-offer-cards]');
-    const actions = $('[data-offer-actions]');
-    const card = (name: string, blurb: string, tag: string, i: number) =>
-      `<button type="button" class="ea-card" data-card="${i}"><span class="ea-card-key">${i + 1}</span><strong>${esc(name)}</strong><span>${esc(blurb)}</span><em>${esc(tag)}</em></button>`;
+    const body = $('[data-offer-body]');
+    const screen = $('[data-screen="offer"]');
+    screen.dataset.kind = o.kind;
     const done = () => {
       offerKeys = [];
       show(null);
       game.finishOffer();
     };
     offerKeys = [];
-    actions.innerHTML = '';
-    if (o.kind === 'perk' && o.perks) {
-      // Two of the three: there are only three stops in a run.
-      kicker.textContent = 'Power-up';
-      copy.textContent = 'They last for the rest of the run.';
-      const perks = o.perks.slice();
-      let left = 2;
+    if (o.kind === 'crate' && o.weapons) {
+      const guns = o.weapons;
+      body.innerHTML =
+        `<p class="ea-eyebrow">Weapon crate</p><h3>Pick a gun.</h3>` +
+        `<p class="ea-copy">Now holding: ${esc(WEAPONS[game.weaponId].name)}. Take one, or keep it.</p>` +
+        `<div class="ea-cards" data-cards>${guns
+          .map((w, i) => `<button type="button" class="ea-card ea-gun" data-card="${i}"><span class="ea-card-key">${i + 1}</span>${pic(gunIcon(w.id), 3)}<strong>${esc(w.name)}</strong><span>${esc(w.blurb)}</span><em>${w.pellets > 1 ? `${w.pellets} shots` : `${w.dmg} dmg`}</em></button>`)
+          .join('')}</div>` +
+        `<div class="ea-menu ea-menu-row"><button type="button" data-offer-leave>Keep my gun <span>Esc</span></button></div>`;
+      offerKeys = guns.map((w) => () => (game.takeWeapon(w.id), done()));
+    } else if (o.wares) {
+      const wares = o.wares;
+      const sold = o.sold;
+      if (o.kind === 'shop') {
+        // A shopping site, open on the computer.
+        body.innerHTML =
+          `<div class="ea-site" role="group" aria-label="BugMart, the shop">` +
+          `<div class="ea-site-bar"><span class="ea-site-dots" aria-hidden="true"><i></i><i></i><i></i></span>` +
+          `<span class="ea-site-url">bugmart.shop/deals</span>` +
+          `<button type="button" class="ea-site-close" data-offer-leave>Close tab <kbd>Esc</kbd></button></div>` +
+          `<div class="ea-site-head"><strong class="ea-site-logo">Bug<span>Mart</span></strong>` +
+          `<span class="ea-site-search" aria-hidden="true">Search for gear…</span>` +
+          `<span class="ea-site-wallet">${coinPic}<b data-wallet></b> chips</span></div>` +
+          `<p class="ea-site-deal">Delivered before the next round · Prices rise with every order</p>` +
+          `<div class="ea-site-grid" data-cards>${wares
+            .map((w, i) => {
+              const r = rating(w.id);
+              return `<button type="button" class="ea-ware" data-card="${i}"><span class="ea-card-key">${i + 1}</span>` +
+                `<span class="ea-ware-pic">${pic(wareIcon(w.icon), 4)}</span><strong>${esc(w.name)}</strong>` +
+                `<span class="ea-ware-blurb">${esc(w.blurb)}</span>` +
+                `<span class="ea-ware-stars" aria-label="${r.stars} stars">${'★'.repeat(r.stars)}${'☆'.repeat(5 - r.stars)} <small>(${r.reviews})</small></span>` +
+                `<span class="ea-ware-buy"><b data-price></b><em data-tag></em></span></button>`;
+            })
+            .join('')}</div></div>`;
+      } else {
+        // A vending machine: a glass front of slots, a credit display, a tray.
+        body.innerHTML =
+          `<div class="ea-vend" role="group" aria-label="Vending machine">` +
+          `<div class="ea-vend-glass" data-cards>${wares
+            .map((w, i) => `<button type="button" class="ea-slot" data-card="${i}">${pic(wareIcon(w.icon), 3)}` +
+              `<strong>${esc(w.name)}</strong><span>${esc(w.blurb)}</span>` +
+              `<em><b>${'AB'[Math.floor(i / 3)]}${(i % 3) + 1}</b> <i data-tag></i></em></button>`)
+            .join('')}</div>` +
+          `<div class="ea-vend-side"><p class="ea-vend-name">Snack &amp; Upgrade</p>` +
+          `<div class="ea-vend-lcd"><span>Credit</span><b data-wallet></b></div>` +
+          `<p class="ea-vend-hint">Keys 1–${wares.length} · Each buy costs more</p>` +
+          `<div class="ea-vend-tray" data-tray aria-live="polite"></div>` +
+          `<button type="button" class="ea-vend-leave" data-offer-leave>Walk away <span>Esc</span></button></div></div>`;
+      }
+      const tray = body.querySelector<HTMLElement>('[data-tray]');
       const paint = () => {
-        title.textContent = left === 2 ? 'Pick two.' : 'Pick one more.';
-        cards.innerHTML = perks.map((p, i) => card(p.name, p.blurb, 'Free', i)).join('');
-        offerKeys = perks.map((p) => () => {
-          game.takePerk(p);
-          perks.splice(perks.indexOf(p), 1);
-          if (--left > 0 && perks.length) {
-            paint();
-            cards.querySelector<HTMLElement>('[data-card]')?.focus({ preventScroll: true });
-          } else done();
+        body.querySelector('[data-wallet]')!.textContent = String(game.funds);
+        body.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((b, i) => {
+          // Prices climb with every purchase, so they're redrawn after each.
+          const price = game.price(wares[i]);
+          b.disabled = sold.has(i) || game.funds < price;
+          const shown = b.querySelector('[data-price]');
+          if (shown) shown.textContent = `${price} chips`;
+          b.classList.toggle('is-sold', sold.has(i));
+          const tag = b.querySelector('[data-tag]')!;
+          if (o.kind === 'shop') tag.textContent = sold.has(i) ? 'Bought' : game.funds < price ? 'Not enough' : 'Buy now';
+          else tag.textContent = sold.has(i) ? 'Sold' : String(price);
         });
       };
-      paint();
-    } else if (o.kind === 'weapon' && o.weapons) {
-      kicker.textContent = 'Weapon';
-      title.textContent = 'Swap your gun.';
-      copy.textContent = `Now holding: ${WEAPONS[game.weaponId].name}. Take one, or keep it.`;
-      cards.innerHTML = o.weapons.map((w, i) => card(w.name, w.blurb, w.pellets > 1 ? `${w.pellets} shots` : `${w.dmg} dmg`, i)).join('');
-      offerKeys = o.weapons.map((w) => () => (game.takeWeapon(w.id), done()));
-      actions.innerHTML = '<button type="button" data-offer-leave>Keep my gun <span>Esc</span></button>';
-    } else if (o.kind === 'shop' && o.shop) {
-      kicker.textContent = 'Shop';
-      title.textContent = 'Spend your chips.';
-      const items = o.shop;
-      const sold = new Set<number>();
-      const paint = () => {
-        copy.textContent = `You have ${game.funds} chips.`;
-        cards.innerHTML = items
-          .map((it, i) => card(it.name, it.blurb, sold.has(i) ? 'Sold' : `${it.price} chips`, i))
-          .join('');
-        cards.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((b, i) => {
-          b.disabled = sold.has(i) || game.funds < items[i].price;
-        });
-      };
-      offerKeys = items.map((it, i) => () => {
-        if (sold.has(i) || !game.buy(it)) return;
+      offerKeys = wares.map((w, i) => () => {
+        if (sold.has(i) || !game.buy(w)) return;
         sold.add(i);
+        if (tray) tray.innerHTML = `${pic(wareIcon(w.icon), 3)}<span>${esc(w.name)}</span>`;
         paint();
       });
       paint();
-      actions.innerHTML = '<button type="button" data-offer-leave>Leave the shop <span>Esc</span></button>';
-    } else {
-      kicker.textContent = 'Repair bay';
-      title.textContent = 'Good as new.';
-      game.repair();
-      copy.textContent = 'Fully repaired, and 10 chips found down the back of the lift.';
-      cards.innerHTML = '';
-      actions.innerHTML = '<button type="button" data-offer-leave>Back to the floor <span>Enter</span></button>';
     }
-    cards.onclick = (e) => {
-      const b = (e.target as Element).closest<HTMLButtonElement>('[data-card]');
+    body.onclick = (e) => {
+      const t = e.target as Element;
+      const b = t.closest<HTMLButtonElement>('[data-card]');
       if (b && !b.disabled) offerKeys[Number(b.dataset.card)]?.();
+      else if (t.closest('[data-offer-leave]')) done();
     };
-    actions.onclick = (e) => (e.target as Element).closest('[data-offer-leave]') && done();
     leaveOffer = done;
     show('offer');
+    (body.querySelector<HTMLElement>('[data-card]:not(:disabled)') ?? body.querySelector<HTMLElement>('[data-offer-leave]'))?.focus({ preventScroll: true });
   }
   let leaveOffer: (() => void) | null = null;
 
@@ -575,7 +600,6 @@ export function openArcade({ fade, shardSource }: { fade: boolean; shardSource?:
       if ((e.code === 'Escape' || (e.code === 'Enter' && !(document.activeElement instanceof HTMLButtonElement))) && leaveBtn) {
         return void (e.preventDefault(), leaveOffer?.());
       }
-      if (e.code === 'Escape') return void e.preventDefault(); // a power-up must be picked
     }
     if (e.code === 'KeyM') return void (setMuted(!isMuted()), syncMute());
     if (game.mode === 'paused' && (e.code === 'Escape' || e.code === 'KeyP')) return void (e.preventDefault(), resume());

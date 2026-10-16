@@ -26,10 +26,10 @@ import {
 } from './ending';
 import { BREAK, crackReach, DEPTH, FALL_G, paintCracks, SLAM, TILE_H, TILE_W, tileAt, type Faller, type Quake, type Rubble, type Tile } from './quake';
 import {
-  ARENA, blocked, clamp, collide, DOORS, FLOOR_TOP, FRONT, len, PROPS, prune, rand, setProps, SHADOW, SIDE, Sparks, stopsShot,
+  ARENA, blocked, clamp, collide, DOORS, FLOOR_TOP, FRONT, len, prop, PROPS, prune, rand, setProps, SHADOW, SIDE, Sparks, stopsShot,
   VIEW_H, VIEW_W, WALL_TOP, type Body, type DoorSide, type Prop,
 } from './world';
-import { freshLoadout, liftKinds, LIFT_LABEL, makeOffer, WEAPONS, type Ctx, type Loadout, type Offer, type OfferKind } from './upgrades';
+import { freshLoadout, makeOffer, priceOf, STOPS, visits, WEAPONS, type Ctx, type Loadout, type Offer, type Stop, type Ware } from './upgrades';
 
 export { VIEW_H, VIEW_W };
 
@@ -51,6 +51,11 @@ const floorFor = (round: number) => (round <= KING_ROUND ? round - 1 : B1);
 // The lift down between floors, as one timeline (seconds): its doors close
 // over the view, the floor counts down, and they open on the next one.
 const SHUT = 0.45;
+// How long a stop stays open between rounds, and how soon after the player's
+// done with it the next round comes.
+const BREATHER = 12;
+const DONE = 2;
+
 const OPEN = 1.15;
 const RIDE = 1.6;
 
@@ -141,6 +146,20 @@ interface Beam {
   ey: number;
 }
 
+/**
+ * What's open between rounds: the shop on a computer, the vending machine,
+ * or a weapon crate that drops in. Touch it to open it.
+ */
+interface Station {
+  kind: Stop;
+  prop: Prop;
+  armed: boolean; // opens on touch; re-arms once the player steps away
+  used: boolean; // something bought or taken
+  h: number; // the crate: how far it still has to fall
+  v: number;
+  offer: Offer | null; // stocked on the first visit, the same on the next
+}
+
 /** A shockwave from a slam: a ring along the floor. Dash through it. */
 interface Wave {
   x: number;
@@ -203,7 +222,7 @@ export interface RunResult {
   record: boolean;
   won: boolean; // beat the Daemon
   floor: string; // where it ended: 10F … G, B1
-  time: number; // seconds of play: pauses and the lifts' menus don't count
+  time: number; // seconds of play: pauses and the shop's menus don't count
 }
 
 export interface Hooks {
@@ -211,7 +230,7 @@ export interface Hooks {
   /** `dark`: the floor behind it is dark (B1), so the text should be light. */
   banner(title: string, sub?: string, dark?: boolean): void;
   over(result: RunResult): void;
-  /** The player stepped into a lift: show its choices; call finishOffer() when done. */
+  /** The player opened the shop, the vending machine or a crate: show it; call finishOffer() when done. */
   offer(o: Offer): void;
 }
 
@@ -297,12 +316,11 @@ export class Game {
   private back = this.doors.filter((d) => d.side === 'back'); // the lifts, left to right
 
   private round = 0;
-  private phase: 'intro' | 'fight' | 'clear' | 'lifts' | 'riding' | 'arriving' | 'won' = 'intro';
+  private phase: 'intro' | 'fight' | 'clear' | 'break' | 'won' = 'intro';
   private ticks = 0; // the run's clock, in steps of play
   private loadout: Loadout = freshLoadout();
   private chips = 0;
-  private lifts: OfferKind[] = []; // what each back lift leads to, left to right, after a boss
-  private ride = -1; // which back door the player is riding
+  private station: Station | null = null;
   private phaseT = 0;
   private toSpawn: Kind[] = [];
   private spawnT = 0;
@@ -355,8 +373,7 @@ export class Game {
     this.deadT = 0;
     this.chips = 0;
     this.loadout = freshLoadout();
-    this.lifts = [];
-    this.ride = -1;
+    this.station = null;
     this.held.clear();
     this.player = {
       x: 160, y: 118, z: 0, vx: 0, vy: 0, vz: 0, r: 4,
@@ -400,6 +417,7 @@ export class Game {
     setProps(FLOORS[n].props);
     this.quake = null;
     this.descent = null;
+    this.station = null;
     this.spit = [];
     this.waves = [];
     this.beam = null;
@@ -593,54 +611,84 @@ export class Game {
         const healed = p.hp < this.loadout.maxHp;
         p.hp = Math.min(this.loadout.maxHp, p.hp + 1);
         [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.14, 0.08, 'triangle', i * 0.09));
-        if (this.round % 5 === 0) {
-          // After a boss, the back lifts open, each going somewhere different.
-          this.phase = 'lifts';
-          this.lifts = liftKinds();
-          this.banner('Boss down', `Take a lift: ${this.lifts.map((k) => LIFT_LABEL[k]).join(' · ')}`);
-        } else {
+        const stop = STOPS[this.round];
+        if (!stop || !this.openStop(stop)) {
           this.phase = 'clear';
           this.phaseT = 2.4;
           this.banner(`Round ${this.round} cleared`, healed ? '+1 heart' : 'Full health');
         }
       }
-    } else if (this.phase === 'clear' && this.phaseT <= 0) {
-      if (floorFor(this.round + 1) !== this.floor) this.startDescent();
-      else this.startRound(this.round + 1);
+    } else if (this.phase === 'clear' && this.phaseT <= 0) this.nextRound();
+    else if (this.phase === 'break') this.updateStation(this.station!, p, dt);
+  }
+
+  // On to the next round: down a floor first, up in the tower.
+  private nextRound() {
+    this.station = null;
+    if (floorFor(this.round + 1) !== this.floor) this.startDescent();
+    else this.startRound(this.round + 1);
+  }
+
+  // ── Between rounds: the shop, the vending machine, a crate of guns ──
+  private openStop(kind: Stop): boolean {
+    const at = kind === 'crate' ? this.crateSpot()
+      : PROPS.find((pr) => (kind === 'shop' ? pr.kind === 'desk' || pr.kind === 'console' || pr.kind === 'reception' : pr.kind === 'vending'));
+    if (!at) return false;
+    this.station = { kind, prop: at, armed: true, used: false, h: kind === 'crate' ? 150 : 0, v: 0, offer: null };
+    this.phase = 'break';
+    this.phaseT = BREATHER;
+    const sub = { shop: 'The shop is open on the computer', vending: 'The vending machine is stocked', crate: 'A weapon crate is coming in' }[kind];
+    this.banner(`Round ${this.round} cleared`, sub);
+    return true;
+  }
+
+  // Somewhere near the middle with room round it, away from the player.
+  private crateSpot(): Prop {
+    const p = this.player!;
+    let x = 160;
+    let y = 104;
+    search: for (const dy of [0, -22, 22, -40, 40]) {
+      for (const dx of [0, -34, 34, -68, 68]) {
+        const cx = 160 + dx;
+        const cy = 104 + dy;
+        if (!blocked(cx, cy, 16) && len(cx - p.x, cy - p.y) > 26) {
+          [x, y] = [cx, cy];
+          break search;
+        }
+      }
     }
-    else if (this.phase === 'lifts') {
-      // Walk into an open lift to take it.
-      const back = this.back;
-      back.forEach((d) => ((d.open = Math.min(1, d.open + dt * 3)), (d.hold = 1)));
-      const k = back.findIndex((d) => Math.abs(p.x - d.x) < 8 && p.y <= ARENA.y0 + 3);
-      if (k >= 0) {
-        this.phase = 'riding';
-        this.phaseT = 0.75;
-        this.ride = k;
-        p.x = back[k].x;
-        p.vx = p.vy = 0;
-        this.held.clear();
-        tone(1175, 1175, 0.15, 0.05, 'sine');
-      }
-    } else if (this.phase === 'riding') {
-      // In, doors shut, up it goes.
-      const back = this.back;
-      back.forEach((d, i) => (d.open = Math.max(0, d.open - dt * (i === this.ride ? 2.2 : 4))));
-      if (this.phaseT <= 0) {
-        const kind = this.lifts[this.ride];
-        this.mode = 'offer';
-        this.hooks.offer(makeOffer(kind, this.loadout, this.chips, this.round / 5));
-      }
-    } else if (this.phase === 'arriving') {
-      // Back down: the doors open and out it steps.
-      const d = this.back[this.ride];
-      d.open = Math.min(1, d.open + dt * 2.5);
-      if (this.phaseT <= 0) {
-        d.hold = 0.3;
-        this.ride = -1;
-        this.startRound(this.round + 1);
-      }
+    return prop('gunbox', x - 10, y - 4, 20, 9, 10);
+  }
+
+  private updateStation(st: Station, p: Player, dt: number) {
+    if (st.h > 0) {
+      // The crate, dropping in from above.
+      st.v += FALL_G * dt;
+      st.h = Math.max(0, st.h - st.v * dt);
+      if (st.h > 0) return;
+      setProps([...PROPS, st.prop]);
+      collide(p);
+      this.dust(st.prop.x + st.prop.w / 2, st.prop.y + st.prop.h, 10);
+      this.shake(4, 0.25);
+      burst(0.3, 260, 0.5, 'lowpass');
+      tone(140, 50, 0.2, 0.1, 'triangle');
+      return;
     }
+    const pr = st.prop;
+    const d = len(p.x - clamp(p.x, pr.x, pr.x + pr.w), p.y - clamp(p.y, pr.y, pr.y + pr.h));
+    if (!st.armed) {
+      if (d > p.r + 10) st.armed = true;
+    } else if (d < p.r + 2 && !(st.kind === 'crate' && st.used)) {
+      st.armed = false;
+      p.vx = p.vy = 0;
+      this.held.clear();
+      this.mode = 'offer';
+      tone(1175, 1568, 0.08, 0.05, 'triangle');
+      st.offer ??= makeOffer(st.kind, this.loadout, this.chips, visits(st.kind, this.round));
+      this.hooks.offer(st.offer);
+      return;
+    }
+    if (this.phaseT <= 0) this.nextRound();
   }
 
   // ── Down a floor ──
@@ -715,7 +763,7 @@ export class Game {
     c.restore();
   }
 
-  // ── Lifts: what the arcade calls while an offer is open ──
+  // ── What the arcade calls while a stop is open ──
   private upCtx(): Ctx {
     const p = this.player!;
     return { l: this.loadout, heal: (n) => (p.hp = Math.min(this.loadout.maxHp, p.hp + n)) };
@@ -729,54 +777,38 @@ export class Game {
     return this.loadout.weapon;
   }
 
-  /** Spend chips on a shop item. Returns false if they can't afford it. */
-  buy(item: { price: number; apply(c: Ctx): void }): boolean {
-    if (this.chips < item.price) return false;
-    this.chips -= item.price;
-    item.apply(this.upCtx());
+  /** What a ware costs right now. */
+  price(w: Ware) {
+    return priceOf(w, this.loadout);
+  }
+
+  /** Spend chips on a ware. Returns false if they can't afford it. */
+  buy(w: Ware): boolean {
+    const price = this.price(w);
+    if (this.chips < price) return false;
+    this.chips -= price;
+    this.loadout.bought += 1;
+    w.apply(this.upCtx());
+    if (this.station) this.station.used = true;
     this.pushHud();
     tone(880, 1760, 0.1, 0.06, 'triangle');
     return true;
   }
 
-  takePerk(perk: { apply(c: Ctx): void }) {
-    perk.apply(this.upCtx());
-    this.pushHud();
-  }
-
   takeWeapon(id: string) {
     this.loadout.weapon = id;
+    const st = this.station;
+    if (st) (st.used = true), (st.prop.open = true);
     this.pushHud();
   }
 
-  repair() {
-    const p = this.player!;
-    p.hp = this.loadout.maxHp;
-    this.chips += 10;
-    this.pushHud();
-  }
-
-  /** Back to the room, out of the lift the player took. */
+  /** Back to the room. Done shopping, the next round isn't far off. */
   finishOffer() {
     if (this.mode !== 'offer') return;
-    const p = this.player!;
-    // Up in the tower, the lift goes down a floor while the menu is up.
-    if (floorFor(this.round + 1) !== this.floor) {
-      for (const k of this.pickups) if (k.kind === 'chip') this.chips += k.value;
-      this.pickups = [];
-      this.toFloor(floorFor(this.round + 1));
-    }
-    const d = this.back[this.ride];
-    p.x = d.x;
-    p.y = ARENA.y0 + 8;
-    p.inv = 1.2;
-    p.cool = 0.3;
+    if (this.station?.used) this.phaseT = Math.min(this.phaseT, DONE);
     this.mode = 'play';
-    this.phase = 'arriving';
-    this.phaseT = 0.6;
     this.last = performance.now();
     this.pushHud();
-    tone(1175, 1175, 0.12, 0.05, 'sine');
   }
 
   private updateAttract(dt: number) {
@@ -2114,24 +2146,8 @@ export class Game {
           c.fillRect(d.x - 8, FLOOR_TOP - 23, 1, 23);
           c.fillRect(d.x + 8 - half, FLOOR_TOP - 23, 1, 23);
         }
-        const k = this.back.indexOf(d);
-        const kind = (this.phase === 'lifts' || this.phase === 'riding' || this.mode === 'offer') ? this.lifts[k] : undefined;
-        if (kind) {
-          // Where this lift goes: a sign on a plate over the door.
-          const icon = kind === 'weapon' ? this.guns.pistol.icon : this.sprites.signs[kind];
-          const pw = Math.max(13, icon.width + 4);
-          const ph = icon.height + 4;
-          const px = Math.round(d.x - pw / 2);
-          const py = WALL_TOP + 2;
-          c.fillStyle = PAL.k;
-          c.fillRect(px, py, pw, ph);
-          c.fillStyle = PAL.c;
-          c.fillRect(px + 1, py + 1, pw - 2, ph - 2);
-          c.drawImage(icon, Math.round(d.x - icon.width / 2), py + 2);
-        } else {
-          c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
-          c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
-        }
+        c.fillStyle = coming ? PAL.r : d.queue ? PAL.k : PAL.g;
+        c.fillRect(d.x - 1, FLOOR_TOP - 28, 3, 2);
       } else {
         // Side doors: a leaf that swings open into the wall's thickness.
         const x = d.side === 'left' ? 1 : VIEW_W - SIDE + 1;
@@ -2316,6 +2332,7 @@ export class Game {
     if (e) this.drawFlash(e);
     if (this.descent) this.drawDescent(this.descent);
     this.drawBossBar();
+    this.drawCountdown();
   }
 
   private drawScene() {
@@ -2324,9 +2341,7 @@ export class Game {
     for (const e of this.enemies) this.shadow(e.x, e.y, e.r, e.z);
     for (const k of this.pickups) this.shadow(k.x, k.y, 3, k.z);
     for (const s of this.spit) this.shadow(s.x, s.y, 1, 5);
-    // Hidden while it rides a lift.
-    const inLift = this.phase === 'riding' && this.phaseT < 0.45;
-    const p = this.player && !this.player.dead && this.mode !== 'offer' && !inLift ? this.player : null;
+    const p = this.player && !this.player.dead ? this.player : null;
     if (p) this.shadow(p.x, p.y, 4);
     const down = this.player?.dead ? this.player : null;
     if (down) this.shadow(down.x, down.y, 8);
@@ -2374,6 +2389,8 @@ export class Game {
       else this.drawFallen(it.ref as Player);
     }
 
+    if (this.phase === 'break' && this.station) this.drawStation(this.station);
+
     // Shots and sparks on top.
     for (const b of this.bullets) {
       const sy = b.y - GUN_Z;
@@ -2413,6 +2430,50 @@ export class Game {
     this.sparks.draw(c, this.frameNo);
     this.lower.draw(c, this.frameNo++);
     for (const pop of this.pops) drawText(c, pop.text, pop.x, pop.y, pop.life > 0.2 || Math.floor(pop.life * 20) % 2 ? PAL.k : PAL.r);
+  }
+
+  // A crate still falling, or a mark bobbing over whatever's open.
+  private drawStation(st: Station) {
+    const c = this.ctx;
+    const pr = st.prop;
+    if (st.h > 0) {
+      this.shadow(pr.x + pr.w / 2, pr.y + pr.h - 1, (pr.w / 2) * (1 - st.h / 300));
+      c.save();
+      c.translate(0, -Math.round(st.h));
+      drawProp(c, pr, this.time);
+      c.restore();
+      return;
+    }
+    if (st.kind === 'crate' && st.used) return;
+    const icon = st.kind === 'crate' ? this.guns.pistol.icon : this.sprites.marks[st.kind];
+    const w = icon.width + 4;
+    const h = icon.height + 4;
+    // Over its top, clear of a monitor.
+    const top = pr.y + pr.h - pr.height - pr.h - (pr.kind === 'gunbox' ? 0 : 7);
+    const x = Math.round(pr.x + pr.w / 2 - w / 2);
+    const y = Math.round(top - h - 4 + Math.sin(this.time * 4) * 1.5);
+    c.fillStyle = PAL.k;
+    c.fillRect(x, y + 1, w, h - 2);
+    c.fillRect(x + 1, y, w - 2, h);
+    c.fillRect(x + Math.floor(w / 2) - 2, y + h, 4, 1);
+    c.fillRect(x + Math.floor(w / 2) - 1, y + h + 1, 2, 1);
+    c.fillStyle = st.armed ? '#FFFFFF' : PAL.w;
+    c.fillRect(x + 1, y + 1, w - 2, h - 2);
+    c.drawImage(icon, x + 2, y + 2);
+  }
+
+  // Between rounds: the seconds left before the next one, by an hourglass, up top.
+  private drawCountdown() {
+    if (this.phase !== 'break' || this.mode !== 'play') return;
+    const c = this.ctx;
+    const n = String(Math.max(0, Math.ceil(this.phaseT)));
+    const w = 14 + n.length * 4;
+    const x = Math.round(VIEW_W / 2 - w / 2);
+    c.fillStyle = PAL.k;
+    c.fillRect(x, 2, w, 9);
+    c.fillStyle = PAL.y;
+    for (const [dx, dy, ww] of [[3, 3, 5], [4, 4, 3], [5, 5, 1], [4, 6, 3], [3, 7, 5]]) c.fillRect(x + dx, dy, ww, 1);
+    drawText(c, n, x + 11 + (n.length * 4 - 1) / 2, 4, PAL.c);
   }
 
   private put(y: number, kind: number, ref: unknown) {

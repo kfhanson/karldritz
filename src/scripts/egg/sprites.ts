@@ -1,5 +1,6 @@
 // Pixel sprites, drawn as text. Each character is one pixel; '.' is clear.
 // Colours come from the site palette plus one rust accent for the monsters.
+import type { WareIcon } from './upgrades';
 
 export const PAL: Record<string, string> = {
   k: '#111111', // ink
@@ -192,11 +193,12 @@ export function buildSprites() {
     horns: outlined(['r...r', 'rr.rr', '.rrr.']),
     heart: sprite(HEART),
     chip: sprite(['.yy.', 'ywyy', 'yyyy', '.yy.']),
-    // Signs over the lifts after a boss, outlined so they read on the wall.
-    signs: {
-      shop: outlined(['..kkk..', '.k...k.', 'ggggggg', 'ggggggg', 'yyyyyyy', 'ggggggg', 'ggggggg']),
-      perk: outlined(['...y...', '...y...', 'yyyyyyy', '.yyyyy.', '..yyy..', '.yy.yy.', '.y...y.']),
-      repair: outlined(['.rr.rr.', 'rrrrrrr', 'rrrrrrr', '.rrrrr.', '..rrr..', '...r...']),
+    // Marks that float over what's open between rounds, outlined so they
+    // read on any floor: a trolley over the shop's computer, an up arrow
+    // over the vending machine (the crate gets the pistol).
+    marks: {
+      shop: outlined(['y........', '.yhhhhhhh', '.yhhhhhh.', '..hhhhh..', '..yyyyyy.', '..m...m..']),
+      vending: outlined(['...g...', '..ggg..', '.ggggg.', 'ggggggg', '..ggg..', '..ggg..', '..ggg..']),
     },
     bolt: sprite(BOLT),
   };
@@ -262,3 +264,20 @@ export function drawText(ctx: CanvasRenderingContext2D, text: string, x: number,
     cx += 4;
   }
 }
+
+// Labels for the wares in the shop and the machine.
+const WARES: Record<WareIcon, string[]> = {
+  aid: ['hhhhhhh', 'hhhrhhh', 'hhhrhhh', 'hrrrrrh', 'hhhrhhh', 'hhhrhhh', 'hhhhhhh'],
+  drink: ['.www.', 'rrrrr', 'ryyyr', 'rrrrr', 'rrhrr', 'rrrrr', '.www.'],
+  bullet: ['..m..', '.mmm.', '.mmm.', 'yyyyy', 'yyyyy', 'yyyyy', 'yyyyy'],
+  bolt: ['...yy', '..yy.', '.yyyy', '..yy.', '.yy..', 'yy...'],
+  shoe: ['rr.....', 'rrr....', 'rrrrrr.', 'rrrrrrr', 'hhhhhhh'],
+  pierce: ['....y..', '.....y.', 'yyyyyyy', '.....y.', '....y..'],
+  barrel: ['.m...m.', 'mmm.mmm', 'yyy.yyy', 'yyy.yyy', 'yyy.yyy'],
+  magnet: ['.rrrrr.', 'rr...rr', 'rr...rr', 'rr...rr', 'hh...hh'],
+  coffee: ['..w.w..', '.w.w...', 'hhhhhh.', 'hmmmmhh', 'hhhhh.h', 'hhhhhh.', '.hhhh..'],
+  vest: ['gg...gg', 'ggg.ggg', 'ggggggg', 'gmggggg', 'ggggggg', 'ggggggg'],
+  heal: ['.rr.rr.', 'rrrhrrr', 'rrhhhrr', '.rrhrr.', '..rrr..', '...r...'],
+};
+const wareCache = new Map<WareIcon, HTMLCanvasElement>();
+export const wareIcon = (id: WareIcon) => wareCache.get(id) ?? wareCache.set(id, outlined(WARES[id])).get(id)!;

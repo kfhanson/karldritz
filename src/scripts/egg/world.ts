@@ -14,7 +14,7 @@ export const SHADOW = 'rgba(17,17,17,0.16)';
 
 export type PropKind =
   | 'desk' | 'pillar' | 'plant' | 'rack' | 'table' | 'sofa' | 'cabinet' | 'vending' | 'cooler' | 'copier' | 'reception' | 'bench'
-  | 'server' | 'column' | 'crate';
+  | 'server' | 'column' | 'crate' | 'console' | 'gunbox';
 export interface Prop {
   kind: PropKind;
   x: number; // footprint on the floor
@@ -23,6 +23,7 @@ export interface Prop {
   h: number;
   height: number; // how tall it stands, for drawing
   stopsShots: boolean;
+  open?: boolean; // the weapon crate, once a gun's been taken out
 }
 export const prop = (kind: PropKind, x: number, y: number, w: number, h: number, height: number, stopsShots = false): Prop =>
   ({ kind, x, y, w, h, height, stopsShots });

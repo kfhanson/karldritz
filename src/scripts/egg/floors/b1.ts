@@ -12,7 +12,9 @@ const B1_FLOOR_B = '#545853';
 const B1_JOINT = '#474B46';
 
 // B1, the server room the Root Bug smashes through to. The columns stand
-// under the office pillars; the middle is left open for the fight.
+// under the office pillars; the middle is left open for the fight. The
+// console at the front runs the shop; the vending machine is for the night
+// shift.
 const SERVER_PROPS: Prop[] = [
   prop('column', 84, 92, 12, 7, 46, true),
   prop('column', 224, 92, 12, 7, 46, true),
@@ -20,7 +22,8 @@ const SERVER_PROPS: Prop[] = [
   prop('server', 260, 66, 30, 8, 30, true),
   prop('server', 30, 140, 30, 8, 30, true),
   prop('server', 260, 140, 30, 8, 30, true),
-  prop('crate', 126, 150, 12, 8, 10),
+  prop('console', 124, 148, 32, 9, 9),
+  prop('vending', 127, 52, 18, 8, 28, true),
   prop('crate', 184, 58, 12, 8, 10),
   prop('crate', 20, 106, 10, 7, 9),
 ];
@@ -145,7 +148,7 @@ function paintServerRoom(): HTMLCanvasElement {
 }
 
 // The furniture, drawn live so bodies can pass behind it.
-const draw: Record<'column' | 'server' | 'crate', PropDraw> = {
+const draw: Record<'column' | 'server' | 'crate' | 'console', PropDraw> = {
   column(px, { x, y, w, h, height }) {
     // Bare concrete, a hazard band where forklifts would hit it.
     px(x, y + h - height, w, height, '#8A8D86');
@@ -167,6 +170,23 @@ const draw: Record<'column' | 'server' | 'crate', PropDraw> = {
       const on = Math.sin(time * (2.3 + i * 1.3) + i * 2 + x) > 0;
       px(x + w - 4, y + h - height + 4 + i * 4, 2, 1, on ? (i % 4 === 0 ? PAL.y : '#7FD39A') : '#1A1C1B');
     }
+  },
+  console(px, { x, y, w, h, height }) {
+    // A steel desk with two monitors and a keyboard tray.
+    const top = y + h - height - h;
+    px(x, top, w, h, '#4E524E');
+    px(x, top, w, 1, '#6A6E6A');
+    px(x, y + h - height, w, height, '#3A3D3A');
+    px(x, y + h - height, w, 1, '#5D605B');
+    px(x + 2, y + h - 2, 2, 2, PAL.k);
+    px(x + w - 4, y + h - 2, 2, 2, PAL.k);
+    for (const mx of [x + 3, x + w - 15]) {
+      px(mx, top - 7, 12, 9, PAL.k);
+      px(mx + 1, top - 6, 10, 6, '#2E4D3A');
+      px(mx + 2, top - 5, 6, 1, '#7FD39A');
+      px(mx + 2, top - 3, 4, 1, '#7FD39A');
+    }
+    px(x + w / 2 - 5, top + 4, 10, 2, '#232624');
   },
   crate(px, { x, y, w, h, height }) {
     const top = y + h - height - h;
