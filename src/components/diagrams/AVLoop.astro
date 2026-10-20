@@ -1,0 +1,101 @@
+---
+// AV Simulation case study: what happens inside one car every frame (sensors →
+// NEAT network → controls), and the NEAT loop across generations.
+type Box = { x: number; y: number; w: number; h: number; title: string; lines: string[]; key?: boolean };
+
+const GEN_Y = 262, BH = 70, BW = 156;
+const gen: Box[] = [
+  { x: 15, y: GEN_Y, w: BW, h: BH, title: 'Population', lines: ['20–80 cars, each with', 'its own network'] },
+  { x: 191, y: GEN_Y, w: BW, h: BH, title: 'Drive', lines: ['up to 30 seconds', 'per generation'] },
+  { x: 367, y: GEN_Y, w: BW, h: BH, title: 'Fitness', lines: ['checkpoints passed'], key: true },
+  { x: 543, y: GEN_Y, w: BW, h: BH, title: 'Next generation', lines: ['best car as parent,', 'crossover, mutation'] },
+];
+
+// The network: inputs from the sensors, a hidden layer NEAT grows, four controls.
+const IN = [72, 92, 112, 132, 152].map((y) => [300, y]);
+const HID = [[360, 92], [360, 132]];
+const OUT = [78, 102, 126, 150].map((y) => [420, y]);
+const EDGES: Array<[number[], number[], boolean]> = [
+  [IN[0], HID[0], false], [IN[1], HID[0], false], [IN[2], HID[1], false], [IN[3], HID[1], true], [IN[4], HID[1], false],
+  [HID[0], OUT[0], false], [HID[0], OUT[1], false], [HID[1], OUT[2], false], [HID[1], OUT[3], false],
+  [IN[0], OUT[1], true], [IN[4], OUT[3], false], [IN[2], OUT[2], true],
+];
+const CONTROLS = ['accelerate', 'brake', 'turn left', 'turn right'];
+---
+
+<figure class="diagram">
+  <div class="diagram-scroll">
+    <svg viewBox="0 0 720 384" role="img" aria-labelledby="av-title av-desc">
+      <title id="av-title">How the cars learn to drive</title>
+      <desc id="av-desc">
+        Every frame, each car's distance sensors feed a neural network whose shape and weights are
+        evolved by NEAT, and its four outputs (accelerate, brake, turn left, turn right) drive the car.
+        Every generation, a population of cars drives for up to 30 seconds, fitness counts the
+        checkpoints each one passes, and the best car becomes the parent of the next generation through
+        crossover and mutation.
+      </desc>
+      <defs>
+        <marker id="av-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="d-head" />
+        </marker>
+        <marker id="av-arrow-pine" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="d-head-pine" />
+        </marker>
+      </defs>
+
+      <!-- Inside one car -->
+      <text x="15" y="16" class="d-label">Inside one car · every frame</text>
+
+      <rect x="15" y="34" width="190" height="150" rx="10" class="d-panel" />
+      <path d="M 15 150 C 70 150, 90 70, 205 70" class="d-road" />
+      <path d="M 15 150 C 70 150, 90 70, 205 70" class="d-centre" />
+      <g transform="translate(92 106) rotate(-38)">
+        <g class="d-rays">
+          <line x1="0" y1="0" x2="58" y2="0" />
+          <line x1="0" y1="0" x2="50" y2="-22" />
+          <line x1="0" y1="0" x2="50" y2="22" />
+          <line x1="0" y1="0" x2="30" y2="-36" />
+          <line x1="0" y1="0" x2="30" y2="36" />
+        </g>
+        <rect x="-10" y="-5" width="20" height="10" rx="2.5" class="d-car" />
+      </g>
+      <text x="110" y="172" text-anchor="middle" class="d-sub">car on a Pyglet track</text>
+
+      <path d="M 207 112 L 280 112" class="d-arrow" marker-end="url(#av-arrow)" />
+      <text x="243" y="84" text-anchor="middle" class="d-note">distance</text>
+      <text x="243" y="98" text-anchor="middle" class="d-note">sensors</text>
+
+      <rect x="282" y="34" width="156" height="150" rx="10" class="d-box d-key" />
+      {EDGES.map(([a, b, fresh]) => <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} class:list={['d-edge', fresh && 'd-fresh']} />)}
+      {IN.map(([x, y]) => <circle cx={x} cy={y} r="4" class="d-node" />)}
+      {HID.map(([x, y]) => <circle cx={x} cy={y} r="4" class="d-node d-grown" />)}
+      {OUT.map(([x, y]) => <circle cx={x} cy={y} r="4" class="d-node" />)}
+      <text x="360" y="172" text-anchor="middle" class="d-sub">evolving network</text>
+
+      <path d="M 440 112 L 513 112" class="d-arrow" marker-end="url(#av-arrow)" />
+
+      <rect x="515" y="34" width="190" height="150" rx="10" class="d-box" />
+      {CONTROLS.map((c, i) => <text x="537" y={70 + i * 24} class="d-title d-mono">{c}</text>)}
+      <text x="610" y="172" text-anchor="middle" class="d-sub">four outputs</text>
+
+      <path d="M 610 186 C 610 222, 110 222, 110 190" class="d-loop" marker-end="url(#av-arrow-pine)" />
+      <text x="360" y="230" text-anchor="middle" class="d-note d-pine">drives the car</text>
+
+      <!-- Across generations -->
+      <text x="15" y="252" class="d-label">Across generations · NEAT</text>
+      {gen.map((b) => (
+        <g>
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="8" class:list={['d-box', b.key && 'd-key']} />
+          <text x={b.x + b.w / 2} y={b.y + 26} text-anchor="middle" class="d-title">{b.title}</text>
+          {b.lines.map((l, i) => <text x={b.x + b.w / 2} y={b.y + 45 + i * 15} text-anchor="middle" class="d-sub">{l}</text>)}
+        </g>
+      ))}
+      {[0, 1, 2].map((i) => (
+        <line x1={gen[i].x + BW + 2} y1={GEN_Y + BH / 2} x2={gen[i + 1].x - 3} y2={GEN_Y + BH / 2} class="d-arrow" marker-end="url(#av-arrow)" />
+      ))}
+      <path d="M 621 332 C 621 352, 93 352, 93 336" class="d-loop" marker-end="url(#av-arrow-pine)" />
+      <text x="357" y="374" text-anchor="middle" class="d-note d-pine">repeat; best scores around generation 50</text>
+    </svg>
+  </div>
+  <figcaption>Each car's network turns sensor readings into controls; NEAT breeds better networks every generation.</figcaption>
+</figure>

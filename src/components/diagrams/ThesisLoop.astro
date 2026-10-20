@@ -1,0 +1,104 @@
+---
+// Thesis case study: the two-level loop. NSGA-II evolves reward weight vectors
+// (top); for each one an LSTM-DQN agent learns to run the SUMO intersection
+// (bottom left); the result is a Pareto front of policies (bottom right).
+type Box = { x: number; y: number; w: number; h: number; title: string; lines: string[]; key?: boolean };
+
+const TOP = 54, BH = 74, BW = 156;
+const outer: Box[] = [
+  { x: 15, y: TOP, w: BW, h: BH, title: 'Weight vectors', lines: ['w = (w1, w2, w3)', 'population of 30'] },
+  { x: 191, y: TOP, w: BW, h: BH, title: 'Train an agent', lines: ['LSTM-DQN on', 'reward R(w)'], key: true },
+  { x: 367, y: TOP, w: BW, h: BH, title: 'Evaluate in SUMO', lines: ['throughput, queue', 'variance, total stops'] },
+  { x: 543, y: TOP, w: BW, h: BH, title: 'Select & breed', lines: ['non-dominated sort,', 'SBX, mutation'] },
+];
+const inner: Box[] = [
+  { x: 30, y: 232, w: 130, h: 66, title: 'SUMO + TraCI', lines: ['BSD intersection'] },
+  { x: 325, y: 232, w: 130, h: 66, title: 'LSTM-DQN', lines: ['remembers recent', 'states'], key: true },
+];
+// Pareto chart (throughput up, queue variance right): the front bows up-left.
+const FRONT = 'M 540 372 Q 552 262 684 250';
+const ON = [[543, 352], [550, 316], [563, 291], [584, 274], [612, 262], [646, 255], [680, 251]];
+const OFF = [[566, 340], [592, 318], [610, 300], [640, 290], [668, 282], [602, 352], [652, 330]];
+const PICK = ON[3];
+---
+
+<figure class="diagram">
+  <div class="diagram-scroll">
+    <svg viewBox="0 0 720 430" role="img" aria-labelledby="tl-title tl-desc">
+      <title id="tl-title">The two-level training loop</title>
+      <desc id="tl-desc">
+        NSGA-II keeps a population of 30 reward weight vectors. For each, an LSTM-DQN agent is trained
+        in SUMO, evaluated on throughput, queue variance and total stops, and the population is then
+        selected and bred for the next of 20 generations. Inside each training run, the agent reads the
+        halting cars on each approach, picks which approach goes green, and is rewarded by the weighted
+        sum of throughput, fairness and smoothness. The output is a Pareto front of policies.
+      </desc>
+      <defs>
+        <marker id="tl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="d-head" />
+        </marker>
+        <marker id="tl-arrow-pine" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" class="d-head-pine" />
+        </marker>
+      </defs>
+
+      <!-- Upper level -->
+      <text x="15" y="16" class="d-label">Upper level · NSGA-II</text>
+      <path d="M 621 54 C 621 30, 93 30, 93 50" class="d-loop" marker-end="url(#tl-arrow-pine)" />
+      <text x="357" y="28" text-anchor="middle" class="d-note d-pine">next generation, ×20</text>
+      {outer.map((b) => (
+        <g>
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="8" class:list={['d-box', b.key && 'd-key']} />
+          <text x={b.x + b.w / 2} y={b.y + 26} text-anchor="middle" class="d-title">{b.title}</text>
+          {b.lines.map((l, i) => <text x={b.x + b.w / 2} y={b.y + 45 + i * 15} text-anchor="middle" class="d-sub">{l}</text>)}
+        </g>
+      ))}
+      {[0, 1, 2].map((i) => (
+        <line x1={outer[i].x + BW + 2} y1={TOP + BH / 2} x2={outer[i + 1].x - 3} y2={TOP + BH / 2} class="d-arrow" marker-end="url(#tl-arrow)" />
+      ))}
+
+      <!-- Zoom from "Train an agent" into the lower level -->
+      <line x1="191" y1="128" x2="15" y2="168" class="d-zoom" />
+      <line x1="347" y1="128" x2="470" y2="168" class="d-zoom" />
+
+      <!-- Lower level -->
+      <rect x="15" y="168" width="455" height="252" rx="10" class="d-panel" />
+      <text x="31" y="190" class="d-label">Lower level · for each w</text>
+      {inner.map((b) => (
+        <g>
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="8" class:list={['d-box', b.key && 'd-key']} />
+          <text x={b.x + b.w / 2} y={b.y + 26} text-anchor="middle" class="d-title">{b.title}</text>
+          {b.lines.map((l, i) => <text x={b.x + b.w / 2} y={b.y + 44 + i * 14} text-anchor="middle" class="d-sub">{l}</text>)}
+        </g>
+      ))}
+      <path d="M 160 250 L 322 250" class="d-arrow" marker-end="url(#tl-arrow)" />
+      <text x="242" y="222" text-anchor="middle" class="d-note">state</text>
+      <text x="242" y="238" text-anchor="middle" class="d-note">halting cars N, S, E, W</text>
+      <path d="M 325 282 L 163 282" class="d-arrow" marker-end="url(#tl-arrow)" />
+      <text x="242" y="300" text-anchor="middle" class="d-note">action</text>
+      <text x="242" y="316" text-anchor="middle" class="d-note">which approach goes green</text>
+
+      <rect x="30" y="340" width="425" height="62" rx="8" class="d-box d-reward" />
+      <text x="242" y="364" text-anchor="middle" class="d-title d-mono">R = w1·r1 + w2·r2 + w3·r3</text>
+      <text x="242" y="384" text-anchor="middle" class="d-sub">r1 cars cleared · r2 fairness · r3 smoothness</text>
+      <path d="M 95 298 L 95 337" class="d-arrow" marker-end="url(#tl-arrow)" />
+      <path d="M 390 340 L 390 301" class="d-arrow" marker-end="url(#tl-arrow)" />
+
+      <!-- Output -->
+      <path d="M 621 128 L 621 165" class="d-arrow" marker-end="url(#tl-arrow)" />
+      <rect x="490" y="168" width="215" height="252" rx="10" class="d-panel" />
+      <text x="506" y="190" class="d-label">Output · Pareto front</text>
+      <line x1="530" y1="214" x2="530" y2="388" class="d-axis" />
+      <line x1="530" y1="388" x2="694" y2="388" class="d-axis" />
+      <text x="0" y="0" transform="translate(522 300) rotate(-90)" text-anchor="middle" class="d-note">throughput ↑</text>
+      <text x="612" y="406" text-anchor="middle" class="d-note">queue variance →</text>
+      <path d={FRONT} class="d-front" />
+      {OFF.map(([x, y]) => <circle cx={x} cy={y} r="3.5" class="d-off" />)}
+      {ON.map(([x, y]) => <circle cx={x} cy={y} r="3.5" class="d-on" />)}
+      <circle cx={PICK[0]} cy={PICK[1]} r="8" class="d-pick" />
+      <line x1={PICK[0] - 6} y1={PICK[1] - 7} x2="562" y2="236" class="d-leader" />
+      <text x="560" y="230" text-anchor="end" class="d-note d-pine">balanced</text>
+    </svg>
+  </div>
+  <figcaption>NSGA-II evolves the reward weights; for each set, an LSTM-DQN agent learns to run the intersection.</figcaption>
+</figure>

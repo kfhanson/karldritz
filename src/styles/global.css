@@ -542,6 +542,42 @@ body {
   width: 100%;
 }
 
+/* Architecture diagrams inside a case study (components/diagrams). Below the
+   width where their labels would get too small, they scroll sideways. */
+.case-study .diagram { margin-top: 2.5rem; margin-bottom: 2.5rem; }
+.diagram-scroll { overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 600px; height: auto; }
+.diagram text { font-family: var(--font-sans); fill: var(--color-ink-muted); }
+.diagram .d-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+.diagram .d-title { font-size: 13px; font-weight: 500; fill: var(--color-ink); }
+.diagram .d-mono { font-family: var(--font-mono); font-size: 12px; font-weight: 400; }
+.diagram .d-sub { font-size: 11px; }
+.diagram .d-note { font-size: 11px; }
+.diagram .d-pine { fill: var(--color-pine); }
+.diagram .d-box { fill: #fff; stroke: var(--color-wire); stroke-width: 1.5; }
+.diagram .d-key { stroke: var(--color-pine); }
+.diagram .d-reward { fill: var(--color-panel); }
+.diagram .d-panel { fill: none; stroke: var(--color-wire); stroke-width: 1.5; stroke-dasharray: 5 5; }
+.diagram .d-zoom { stroke: var(--color-wire); stroke-width: 1; stroke-dasharray: 3 4; }
+.diagram .d-arrow { fill: none; stroke: var(--color-ink-muted); stroke-width: 1.5; }
+.diagram .d-loop { fill: none; stroke: var(--color-pine); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.diagram .d-head { fill: var(--color-ink-muted); }
+.diagram .d-head-pine { fill: var(--color-pine); }
+.diagram .d-axis { stroke: var(--color-ink-muted); stroke-width: 1; opacity: 0.6; }
+.diagram .d-front { fill: none; stroke: var(--color-pine); stroke-width: 1.5; opacity: 0.6; }
+.diagram .d-on { fill: var(--color-pine); }
+.diagram .d-off { fill: var(--color-ink-muted); opacity: 0.55; }
+.diagram .d-pick { fill: none; stroke: var(--color-pine); stroke-width: 1.5; }
+.diagram .d-leader { stroke: var(--color-pine); stroke-width: 1; }
+.diagram .d-road { fill: none; stroke: var(--color-wire); stroke-width: 26; }
+.diagram .d-centre { fill: none; stroke: var(--color-ink-muted); stroke-width: 1; stroke-dasharray: 6 7; opacity: 0.45; }
+.diagram .d-rays line { stroke: var(--color-pine); stroke-width: 1; opacity: 0.6; }
+.diagram .d-car { fill: var(--color-pine); }
+.diagram .d-edge { stroke: var(--color-ink-muted); stroke-width: 1; opacity: 0.45; }
+.diagram .d-fresh { stroke-dasharray: 3 3; }
+.diagram .d-node { fill: #fff; stroke: var(--color-ink-muted); stroke-width: 1.5; }
+.diagram .d-grown { fill: var(--color-pine); stroke: var(--color-pine); }
+
 .case-study figure figcaption {
   font-family: var(--font-mono);
   font-size: 0.75rem;

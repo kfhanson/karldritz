@@ -4,7 +4,7 @@ category: Genetic Algorithm, Multi-Objective Reinforcement Learning
 type: research
 year: '2026'
 role: First Author, Lead ML Engineer
-summary: Evolving the reward function (NSGA-II) for an LSTM-DQN traffic controller to balance throughput, fairness, and smoothness. Published in Procedia Computer Science, 2026.
+summary: Evolving the reward function (NSGA-II) for an LSTM-DQN traffic controller to balance throughput, fairness, and smoothness. Published in ICCSCI 2026.
 thumbnail: ../../images/flowai-sec.jpeg
 # Media — grid-hover preview + case-study carousel. Both accept images (bare path
 # like ../../images/foo.jpeg) or videos ({ src: videos/foo.mp4 }). Drop assets in
@@ -15,10 +15,10 @@ thumbnail: ../../images/flowai-sec.jpeg
 #   - { src: videos/thesis-demo.mp4 }
 techStack: [Python, SUMO, NSGA-II, LSTM-DQN, Multi-Objective RL]
 metrics:
-  - { value: 'Published', label: 'Procedia Computer Science 2026' }
-  - { value: '1,059 vehicles', label: 'Throughput, balanced policy' }
-  - { value: '−35% queue variance', label: 'vs best baseline' }
-  - { value: '−28% total stops', label: 'vs best baseline' }
+  - { value: 'Published', label: 'Procedia CS, ICCSCI 2026' }
+  - { value: 'Traffic signals', label: 'LSTM-DQN on a real intersection' }
+  - { value: 'Reward shaping', label: 'Evolved with NSGA-II' }
+  - { value: 'Multi-objective', label: 'Throughput, fairness, smoothness' }
 featured: false
 order: 5
 github: https://github.com/kfhanson/Evolutionary-Reward-Shaping-Traffic-Control
@@ -28,6 +28,8 @@ paper: https://doi.org/10.1016/j.procs.2026.08.272
 #   - { label: 'Paper', url: 'https://...' }
 #   - { label: 'Demo video', url: 'https://...' }
 ---
+
+import ThesisLoop from '../../components/diagrams/ThesisLoop.astro';
 
 ## Overview
 
@@ -55,6 +57,8 @@ The controller is a **two-level loop**. NSGA-II proposes a population of weight 
 `[w1, w2, w3]` (normalised to sum to 1); for each one an LSTM-DQN agent is trained on the
 reward `R = w1·r1 + w2·r2 + w3·r3`, run in the simulator, and scored on three fitness
 objectives; NSGA-II uses those scores to evolve the next generation.
+
+<ThesisLoop />
 
 Everything runs in **SUMO** through **TraCI**, modelled on a real intersection: **BSD Raya
 Utama × BSD Grand Boulevard** in BSD City, with traffic from four approaches and demand that

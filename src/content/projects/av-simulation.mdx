@@ -8,7 +8,6 @@ summary: Evolving autonomous-driving controllers with NEAT — peak fitness 84/9
 thumbnail: ../../images/av-sim-poster.jpeg
 hoverThumbnail: { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
 gallery:
-  - { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg, caption: 'NEAT-evolved cars lapping the track' }
   - { image: ../../images/autove.jpeg, caption: 'Presenting the paper at ICORIS 2024' }
 techStack: [Python, NEAT, Pyglet, Genetic Algorithms, Neural Networks]
 metrics:
@@ -22,6 +21,8 @@ paper: https://doi.org/10.1109/ICORIS63540.2024.10903833
 links:
   - { label: 'Demo video', url: 'https://www.youtube.com/watch?v=CB4Qjc4w1Dk' }
 ---
+
+import AVLoop from '../../components/diagrams/AVLoop.astro';
 
 ## Overview
 
@@ -46,6 +47,8 @@ and turn right**. NEAT evolves a population of these networks across generations
 **fitness function counts the checkpoints (track gates) a car passes**, and a **30-second
 timer** caps each generation so a single run can't stall the simulation. The best car of each
 generation becomes the parent for the next, with crossover and mutation driving exploration.
+
+<AVLoop />
 
 I tested on three tracks of increasing difficulty — **Track A (33 checkpoints, easy), Track B
 (37, medium), and Track C (46, hard)** — and ran a hyperparameter study over population size
