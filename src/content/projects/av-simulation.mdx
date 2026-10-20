@@ -3,7 +3,7 @@ title: AV Simulation
 category: Neural Evolution / AI
 type: research
 year: '2024'
-role: AI Engineer
+role: First Author
 summary: Evolving autonomous-driving controllers with NEAT — peak fitness 84/98/100 across three tracks. Published at ICORIS 2024.
 thumbnail: ../../images/av-sim-poster.jpeg
 hoverThumbnail: { src: videos/av-sim.mp4, poster: ../../images/av-sim-poster.jpeg }
@@ -50,21 +50,33 @@ generation becomes the parent for the next, with crossover and mutation driving 
 
 <AVLoop />
 
-I tested on three tracks of increasing difficulty — **Track A (33 checkpoints, easy), Track B
-(37, medium), and Track C (46, hard)** — and ran a hyperparameter study over population size
-and mutation rate to see how each configuration converges. Against the default (population 40,
-mutation 0.6), I compared three tunings: **Tuning 1** (20 / 0.5), **Tuning 2** (60 / 0.8), and
-**Tuning 3** (80 / 0.4).
+I tested on **three tracks** of increasing difficulty and ran a hyperparameter study over
+**population size and mutation rate**, comparing the default setup against three tunings to see
+how each one converges.
 
 ## Outcome
 
 **Tuning 2 (population 60, mutation rate 0.8) was the strongest overall**, rising fastest in
-early generations and reaching peak fitness scores of **84, 98, and 100 on Tracks A, B, and
-C** respectively. Across configurations the best scores landed around the **50th generation**
-and didn't improve meaningfully past the 100th. The smaller population (Tuning 1) did
-relatively well only on the easy track, while the large-population/low-mutation setup
-(Tuning 3) progressed slowly early but caught up on the hardest track. The work was published
-at the 2024 6th International Conference on Cybernetics and Intelligent System (ICORIS).
+early generations. Its peak fitness on each track:
+
+| Track | Checkpoints | Difficulty | Peak fitness, Tuning 2 |
+|---|--:|---|--:|
+| A | 33 | Easy | **84** |
+| B | 37 | Medium | **98** |
+| C | 46 | Hard | **100** |
+
+How the four setups compared:
+
+| Setup | Population | Mutation rate | How it did |
+|---|--:|--:|---|
+| Default | 40 | 0.6 | The baseline to compare against |
+| Tuning 1 | 20 | 0.5 | Did relatively well only on the easy track |
+| **Tuning 2** | **60** | **0.8** | **Strongest overall, fastest early progress** |
+| Tuning 3 | 80 | 0.4 | Slow early, but caught up on the hardest track |
+
+Across all setups, the best scores landed around the **50th generation** and didn't improve
+meaningfully past the 100th. The work was published at the 2024 6th International Conference
+on Cybernetics and Intelligent System (ICORIS).
 
 ## What I learned
 

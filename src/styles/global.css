@@ -542,6 +542,39 @@ body {
   width: 100%;
 }
 
+/* Results tables in a case study. Wide ones scroll sideways on a phone. */
+.case-study table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .case-study table { display: block; overflow-x: auto; }
+}
+.case-study thead th {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+.case-study th,
+.case-study td {
+  text-align: left;
+  padding: 0.6rem 1rem 0.6rem 0;
+  border-bottom: 1px solid var(--color-wire);
+  vertical-align: top;
+}
+.case-study th:last-child,
+.case-study td:last-child { padding-right: 0; }
+.case-study thead th { border-bottom-color: var(--color-ink-muted); }
+.case-study td { color: var(--color-ink); }
+.case-study td strong { font-weight: 600; }
+.case-study td:first-child { white-space: nowrap; }
+
 /* Architecture diagrams inside a case study (components/diagrams). Below the
    width where their labels would get too small, they scroll sideways. */
 .case-study .diagram { margin-top: 2.5rem; margin-bottom: 2.5rem; }

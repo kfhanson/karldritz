@@ -3,7 +3,7 @@ title: Balancing Traffic Signals with Evolution
 category: Genetic Algorithm, Multi-Objective Reinforcement Learning
 type: research
 year: '2026'
-role: First Author, Lead ML Engineer
+role: First Author
 summary: Evolving the reward function (NSGA-II) for an LSTM-DQN traffic controller to balance throughput, fairness, and smoothness. Published in ICCSCI 2026.
 thumbnail: ../../images/flowai-sec.jpeg
 # Media — grid-hover preview + case-study carousel. Both accept images (bare path
@@ -16,7 +16,7 @@ thumbnail: ../../images/flowai-sec.jpeg
 techStack: [Python, SUMO, NSGA-II, LSTM-DQN, Multi-Objective RL]
 metrics:
   - { value: 'Published', label: 'Procedia CS, ICCSCI 2026' }
-  - { value: 'Traffic signals', label: 'LSTM-DQN on a real intersection' }
+  - { value: 'Presented', label: 'ICCSCI 2026 session' }
   - { value: 'Reward shaping', label: 'Evolved with NSGA-II' }
   - { value: 'Multi-objective', label: 'Throughput, fairness, smoothness' }
 featured: false
@@ -78,22 +78,33 @@ forever.
 
 ## Outcome
 
-Against four baselines (fixed-time, rule-based actuated, and single-objective RL agents tuned
-for maximum throughput and for maximum fairness), the NSGA-II balanced policy was **best on all
-three metrics at once: 1,059 vehicles, queue variance 13 and 14,676 stops**. The best any
-baseline managed was 1,032 vehicles, variance 20 and 20,429 stops, so that is **35% lower queue
-variance and 28% fewer stops**. The
-single-objective agents show why: max-throughput barely beat a simple actuated controller and
-stopped more often, while max-fairness switched phases so aggressively it caused gridlock and
-collapsed to 625 vehicles.
+I compared the NSGA-II balanced policy against four baselines, and it was **best on all three
+metrics at once**:
 
-The Pareto front held the surprise. Throughput-heavy weightings (w1 ≥ 0.60) moved plenty of
-cars but with high queue variance and the most stops. The **highest throughput on the front
-(about 1,059 vehicles) came from a smoothness-leaning weighting (w1 ≈ 0.38)**, at the cost of
-the highest queue variance; the balanced cluster (w1 ≈ 0.50–0.55) handled roughly 1,050
-vehicles with variance as low as 11.0 and around 14,400 stops. Training took **about 2 hours
-on a high-end laptop**, and inference afterwards is cheap. SUMO and network training are
-stochastic, so exact numbers vary between runs, but the pattern over the baselines holds.
+| Method | Throughput ↑ | Queue variance ↓ | Total stops ↓ |
+|---|--:|--:|--:|
+| Fixed-time | 1,011 | 67 | 35,913 |
+| Rule-based actuated | 1,015 | 20 | 20,429 |
+| RL, max throughput | 1,032 | 21 | 20,977 |
+| RL, max fairness | 625 | 393 | 78,822 |
+| **NSGA-II balanced** | **1,059** | **13** | **14,676** |
+
+Against the best baseline numbers, that is **35% lower queue variance and 28% fewer stops**.
+The single-objective agents show why: max-throughput barely beat a simple actuated controller
+and stopped more often, while max-fairness switched phases so aggressively it caused gridlock.
+
+The Pareto front shows how the weights trade off against each other:
+
+| Part of the front | Throughput weight w1 | Throughput | Queue variance | Total stops |
+|---|---|---|---|---|
+| Throughput-heavy | 0.60 or more | high | above 12.5 | over 15,200 |
+| Balanced | 0.50–0.55 | about 1,050 | as low as 11.0 | about 14,400 |
+| Smoothness-leaning | about 0.38 | **about 1,059, the highest** | the highest | – |
+
+The surprise is the last row: **the highest throughput came from a policy that cared more
+about smooth flow than about throughput**. Training took **about 2 hours on a high-end
+laptop**, and inference afterwards is cheap. SUMO and network training are stochastic, so
+exact numbers vary between runs, but the pattern over the baselines holds.
 
 ## What I learned
 
