@@ -125,7 +125,7 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
                     loading={i === 0 ? 'eager' : 'lazy'}
                   />
                 )}
-                <span class="cf-tab" aria-hidden="true">{m.caption}</span>
+                <span class="cf-tab" aria-hidden="true">{String(i + 1).padStart(2, '0')} · {m.caption}</span>
               </div>
             ))}
           </div>
