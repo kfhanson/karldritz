@@ -3,8 +3,8 @@ title: CuanCerdas
 category: Agentic LLM / FinTech
 type: competition
 year: '2026'
-role: Team Lead
-summary: AI finance copilot for Indonesian MSMEs — auto-generated reports + a grounded advisor chatbot. Paylabs × Alibaba Cloud Hackathon, 2nd place.
+role: Team Leader
+summary: An AI finance copilot for Indonesian MSMEs that turns transactions into reports and explains them through an advisor chatbot. 2nd place at the Paylabs × Alibaba Cloud Hackathon.
 thumbnail: ../../images/cuancerdas.jpeg
 # hoverThumbnail / gallery: add a demo capture or video when you have one —
 # { image: ../../images/x.jpeg, caption: '…' } or { src: videos/x.mp4, poster: ../../images/x.jpeg, caption: '…' }
@@ -14,7 +14,6 @@ metrics:
   - { value: 'Final demo pitch', label: 'BINUS University' }
   - { value: 'Finance copilot', label: 'Reports + advisor chatbot' }
   - { value: 'MCP grounding', label: 'Qwen over Paylabs data' }
-  - { value: 'LLM + Full-stack', label: 'Agents, MCP, Fastify, Postgres' }
 featured: true
 order: 2
 links:
@@ -24,82 +23,72 @@ links:
 
 ## Overview
 
-CuanCerdas was built for the **Paylabs × Alibaba Cloud Mini Hackathon 2026** — a
-build-and-pitch competition judged on a live demo, run on Alibaba Cloud infrastructure
-with Paylabs (a payment gateway) as the data partner. I led a four-person team — Team Jo —
-through the build, and we placed **2nd**.
+CuanCerdas was built for the **Paylabs × Alibaba Cloud Mini Hackathon 2026**, a build-and-pitch
+competition judged on a live demo. It ran on Alibaba Cloud, with Paylabs (a payment gateway)
+as the data partner. I led a team of four, Team Jo, and we placed **2nd**.
 
 ## The problem
 
-We bet on **financial literacy for Indonesian MSMEs (UMKM)**. The gap is real and large:
-**87% of UMKM** don't do basic financial management — budgeting, recording, reporting,
-controlling — and **over half** of owners finished only primary school, which caps
-financial literacy and strategic planning. Yet UMKM are **60.5% of Indonesia's GDP** and
-**96.9% of national employment**, and 2 in 5 have never touched AI. They sit on a goldmine
-of transaction data (everything they run through Paylabs) but have neither the time nor the
-training to read it, and generic chatbots don't help because the advice isn't grounded in
-the business's actual numbers.
+We focused on **financial literacy for Indonesian MSMEs (UMKM)**. **87% of UMKM** don't do basic
+financial management like budgeting, recording or reporting, even though UMKM make up **60.5%
+of Indonesia's GDP**. They already have plenty of transaction data in Paylabs, but no time or
+training to read it, and a generic chatbot doesn't help because its advice isn't based on the
+business's actual numbers.
 
-So we built a **finance copilot**: an AI agent that turns a merchant's Paylabs transactions
-into a clean, structured financial report — and a chatbot, **JO**, that explains that report
-in plain language and advises on it. The framing we pitched on: *"we don't just tell UMKM how
-much money they make — we teach them how to manage and grow it through AI."*
+So we built a **finance copilot**: an AI agent that turns a merchant's Paylabs transactions into
+a clear financial report, and a chatbot, **JO**, that explains the report in plain language and
+gives advice on it. The line we pitched with: *"we don't just tell UMKM how much money they
+make — we teach them how to manage and grow it through AI."*
 
 ## What I did
 
-I led the team as **Team Lead** and worked **full-stack** across the build — the agent
-design and the MCP grounding layer, the Fastify backend and report pipeline, and the live
-pitch.
+I was the **Team Leader** and worked **full-stack**: the agent design, the MCP layer that
+connects the agent to the data, the backend and report pipeline, and the final pitch.
 
 {/* TODO (optional): split out what you owned vs. delegated to Aura / Jenson / Kelila —
 the clearer the ownership line, the stronger the signal for a recruiter. */}
 
 ## Building it
 
-The system is two AI behaviours over one shared, grounded data layer:
+The system has two AI parts that share one data layer:
 
-- **Report-generation agent** — turns a date range of transactions into a structured
-  report: revenue, COGS, OPEX, gross/net profit, net margin, ending cash, category and
-  channel breakdowns, and a previous-period comparison. Generation is asynchronous and
-  callback-based: the frontend kicks off a job, the agent does its analysis, writes results
-  to a staging row, and the backend persists the finished report into normalized tables and
-  renders the dashboard summary, charts, insights, and a PDF export.
-- **Advisor chatbot (JO)** — a streaming financial advisor. The browser holds a WebSocket to
-  the backend, which relays a token stream from the agent (NDJSON over HTTP). JO is
-  merchant-scoped and report-anchored: it lists the merchant's reports, pulls only the
-  relevant one, loads recent chat context and a transaction summary, and answers from there.
-  Users can pick the advisor model per chat from a live allowlist.
+- **Report agent.** Takes a date range of transactions and builds a financial report with
+  revenue, costs, profit, cash and a comparison with the previous period. It runs in the
+  background, and the result shows up as a dashboard and a PDF.
+- **JO, the advisor chatbot.** Streams its answers like a normal chat. Each conversation is
+  tied to one merchant and one report, so JO answers from that report and the merchant's
+  recent transactions, not from general knowledge.
 
-The piece I'm proudest of is the **grounding layer**. The agent never runs free-form SQL —
-it talks to the database through an **MCP server** that exposes a fixed catalogue of typed
-tools (`get_report_metrics`, `list_available_reports`, `get_advisor_report`, …), so every
-number JO cites is computed deterministically, not hallucinated. `merchantId` is the hard
-data-isolation boundary, so a merchant can only ever see its own books. That discipline shows
-up in JO's behaviour: when a user asked it to "set a 1–5% inventory-efficiency target for the
-next two weeks," JO pushed back — the transaction schema is category-level, there's no
-SKU/turnover data to support a target like that — and explained *why*, instead of inventing a
-confident-sounding number.
+The part that mattered most was how the agent gets its data. It never writes its own database
+queries. Instead it talks to an **MCP server** that only offers a fixed set of tools, like "get
+this report's metrics", so every number JO mentions is calculated by our code, not made up by
+the model. Each merchant can only ever see their own data.
 
-The stack: a **Fastify + TypeScript** backend (Prisma, Zod, PDFKit, WebSocket relay, JWT
-auth), a **FastAPI** agent service, the **MCP** tool server, and **PostgreSQL** — all running
-on **Alibaba Cloud** (ECS for compute, OSS for storage), with the agent powered by **Qwen**.
+You could see this in how JO behaved. When someone asked it to set a 1–5% inventory-efficiency
+target for the next two weeks, JO said no: our data only had product categories, not stock
+levels, so there was nothing to base that target on. It explained why instead of making up a
+number.
+
+The backend is **Fastify** with **TypeScript** and **PostgreSQL**, the agent runs on **Qwen**,
+and everything is hosted on **Alibaba Cloud**.
 
 {/* TODO (optional): name the one obstacle you hit under the clock — what you had to cut or
 fake to ship, and how the callback/streaming split came together late. */}
 
 ## Outcome
 
-We finished **2nd place** with a working technical MVP — not just a concept deck: real async
-report generation, real streaming advisor responses, structured DB-backed persistence, and
-merchant-scoped, deterministic data access through the MCP tool layer.
+We finished **2nd place** with a working MVP: real reports, real streaming answers from JO,
+and data access that stayed inside each merchant's own books.
 
-We pitched the business case as hard as the demo: a **freemium** model where basic reporting
-and general literacy education are free for every Paylabs merchant, with the deep AI mentor
-and predictive analysis behind a monthly subscription — turning Paylabs from a payment
-*utility* into an *ecosystem* for UMKM.
+We also pitched a **freemium** business model. Basic reports and financial education are free
+for every Paylabs merchant, and the AI advisor and predictions are a monthly subscription. For
+Paylabs, that turns a payment tool into something UMKM keep coming back to.
 
 {/* TODO: the room itself — who you pitched to, how the live demo of JO landed, a judge
 question you remember. This is the part that makes the 2nd-place result land. */}
 
-{/* TODO: ## What I learned — one paragraph: what you'd change about the report/advisor
-split or the grounding design, and what leading a team under hackathon pressure taught you. */}
+## What I learned
+
+The biggest lesson was that limiting what the AI can do made it more useful. Because JO could
+only use our fixed tools, it could say "I don't have that data" instead of guessing, and for a
+finance product that trust matters more than a clever answer.
