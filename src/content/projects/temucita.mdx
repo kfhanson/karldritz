@@ -3,22 +3,22 @@ title: TemuCita AI Companion
 category: AI Companion / Agentic LLM
 type: project
 year: '2026'
-role: Volunteer, Solo Full-Stack & AI Engineer
+role: Volunteer, Solo Full-Stack & Applied AI Engineer
 summary: Cita, an AI companion for TemuCita, an Indonesian mental-health community. A safe space to talk that remembers, answers from vetted material, and points people toward real support.
-thumbnail: ../../images/temucita.png
+thumbnail: ../../images/temucita-chat.png
 # hoverThumbnail: — add a SECOND asset (a chat mid-conversation, or a demo video)
 # before setting this; crossfading to the same image as the thumbnail does nothing.
 # Case-study carousel. Add more screenshots (a chat mid-conversation showing
 # retrieval, the admin document dashboard) or a demo video as they're captured.
 gallery:
-  - { image: ../../images/temucita.png, caption: 'Cita, the companion chat inside TemuCita' }
+  - { image: ../../images/temucita-chat.png, caption: 'Cita mid-conversation (sample chat)' }
+  - { image: ../../images/temucita-welcome.png, caption: 'The welcome screen inside TemuCita' }
 techStack: [TypeScript, Next.js, Prisma, PostgreSQL, pgvector, Amazon Bedrock, AWS S3, Google Cloud, Clerk]
 metrics:
   - { value: 'Volunteer build', label: 'Mental-health community' }
   - { value: 'Live in platform', label: 'Shipped at /ai-pendamping' }
   - { value: 'AI companion', label: 'RAG + memory, grounded answers' }
   - { value: 'Bahasa Indonesia', label: 'Speaks the way members do' }
-  - { value: 'LLM + Full-stack', label: 'RAG, Bedrock, Next.js, Postgres' }
 featured: false
 order: 4
 # Extra labeled links shown under "Resources" — e.g. demo, write-up, repo.
@@ -53,27 +53,16 @@ curates, it remembers, and it suggests a community event when one actually fits.
 ## Building it
 
 Cita is one **Next.js** app on **PostgreSQL** with **pgvector**, using **Prisma** as the ORM
-and **Clerk** for sign-in and admin access. I kept the data model small, only seven tables.
+and **Clerk** for sign-in and admin access. 
 
-Replies stream in word by word, and each conversation is named from the first message and
-saved in a sidebar. Users can delete any chat in one click, because in a mental-health app
-the history belongs to the user. For people who don't know how to start, there are starter
-prompts like *Merasa Sedih* (feeling sad) and *Sulit Tidur* (trouble sleeping).
-
-- **Grounded answers.** Admins upload PDFs or text through a dashboard. Each document is split
-  into chunks of about 800 characters and stored as vectors. When a user sends a message, I
-  search for the closest chunks, keep only those within a `0.75` cosine distance, and give the
-  top four to the model. I made the threshold strict on purpose, since an answer based on
-  something only loosely related is worse than no retrieved context at all.
-- **Memory.** When a conversation gets long, the oldest fifteen messages are condensed into a
-  summary of about 200 words, so a conversation can go on for weeks without overflowing the
-  context window.
+- **Grounded answers.** Admins upload PDFs or text through a dashboard that acts as a source-of-truth document.
+- **Memory.** When a conversation gets long, the oldest fifteen messages are condensed into a summary of about 200 words, so a conversation can go on for weeks without overflowing the context window.
 - **User profile.** In the background, Cita builds a small profile for each user: a one-line
   summary and a list of interests like `["anxiety", "sleep issues", "mindfulness"]`. I kept it
   small on purpose, because I didn't want to store a detailed record of someone's mental
   state.
 - **Event suggestions.** On each message, the app also searches the community's events using
-  the message and the profile. The threshold here is tighter (`0.65`), because a bad
+  the message and the profile. This search is stricter, so Cita only suggests an event when it really fits, because a bad
   suggestion at a vulnerable moment feels like being sold to.
 
 I considered a multi-agent framework like LangGraph, but decided against it. The flow is
@@ -93,10 +82,7 @@ Cita is live inside TemuCita's platform, so members use the same login and don't
 to a separate site. Admins can upload a new document and Cita can use it right away, without
 a deploy or a developer.
 
-{/* TODO: the numbers that would make this land. Anything real helps — documents in the
-knowledge base, conversations since launch, members using it, or a line of feedback from
-someone at TemuCita about what it changed for them. In a volunteer community project, one
-honest quote is worth more than a benchmark. */}
+A lot of positive feedbacks about the page, everyone liked how it looks and enjoyed their interaction with the AI companion.
 
 ## What I learned
 
