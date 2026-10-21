@@ -354,6 +354,11 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Screenshots of UI: don't offer the text in them up for selection
+     (Safari's Live Text) or the iOS long-press image menu. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .coverflow-card[data-fit='contain'] img,
 .coverflow-card[data-fit='contain'] video {
