@@ -34,21 +34,17 @@ Indonesia** in our track.
 
 ## The problem
 
-CitiFlowAI is an intelligent **Traffic Management as a Service (TMaaS)** platform built on
-Huawei Cloud. We anchored it to a problem we live with: in the Greater Jakarta area,
-traffic congestion drains an estimated **Rp 100 trillion (≈ $6.1 billion) a year** in wasted
-fuel, lost productivity, and health costs, and the average Jakarta driver loses **89 hours
-a year** stuck in traffic — a 37% jump from 2023. Road networks grow at roughly 0.3% a year,
-so you can't build your way out of it; the only scalable fix is to make the existing grid
-dramatically more efficient.
+CitiFlowAI is a **Traffic Management as a Service (TMaaS)** platform built on Huawei Cloud.
+We anchored it to a problem we live with: in the Greater Jakarta area, traffic congestion
+costs an estimated **Rp 100 trillion (about $6.1 billion) a year** in wasted fuel, lost
+productivity and health costs, and the average Jakarta driver loses **89 hours a year** stuck
+in traffic. Building more roads can't keep up, so the realistic fix is to make the existing
+roads work better.
 
-Most "smart" traffic systems are still fundamentally reactive — timer-based controllers,
-or centralized cloud models that *adapt to* past trends and hand engineers recommendations
-to approve. CitiFlowAI flips that to *proactive*: each intersection becomes an AI agent
-that predicts and prevents gridlock before it forms, and the agents cooperate to roll
-"Green Wave" corridors and clear paths for emergency vehicles. Delivered as a
-subscription, TMaaS turns a massive upfront CAPEX project into a predictable OPEX line —
-which is what actually unblocks adoption for cash-constrained cities.
+Most "smart" traffic systems still only react: lights run on timers, or a central model looks
+at past trends and suggests changes for engineers to approve. CitiFlowAI tries to act before
+gridlock forms. Each intersection is an AI agent, and the agents work together to create
+"green wave" corridors and clear the way for emergency vehicles.
 
 ## What I did
 
@@ -58,39 +54,27 @@ APAC final. I also drove the pitch during the pitching event.
 
 ## Building it
 
-Fixed-cycle traffic lights can't react to live demand, and single-agent controllers
-optimize one intersection while pushing congestion onto their neighbours. Coordinating
-many intersections at once is a genuinely multi-agent problem: each signal's best action
-depends on what every adjacent signal is doing. I framed each intersection as an agent in a
-shared environment and trained them with **Multi-Agent Reinforcement Learning (MARL)** so
-they learn cooperative policies instead of locally-greedy ones, with simulations running in
-**SUMO** and training on **Huawei ModelArts**.
+Fixed-cycle lights can't react to live traffic, and a controller that only looks at one
+intersection often just pushes the jam to the next one. So I treated each intersection as an
+agent in a shared environment and trained them together with **Multi-Agent Reinforcement
+Learning (MARL)**, so they learn to cooperate instead of each being greedy. The simulations ran
+in **SUMO** and training ran on **Huawei ModelArts**.
 
-The system runs on a **hybrid edge-cloud architecture**, because the hard constraint here is
-latency. A pure-cloud loop — camera → cloud → traffic controller — runs 500–1000 ms
-round-trips; by the time a centralized model spots an ambulance, the ambulance is already in
-the intersection. So inference lives at the edge:
+The system is split between the **edge and the cloud**, because speed matters most here. Sending
+camera video to the cloud and back takes 500–1000 ms, and by then an ambulance is already in the
+intersection. So:
 
-- **Edge (micro-intelligence):** a **Huawei Atlas 500** AI edge server at each intersection
-  runs the trained policy on live video locally, making sub-200 ms decisions. It handles
-  16-channel HD video and is built fan-free for −40 °C to +70 °C — it mounts on a traffic
-  pole, not in a data centre.
-- **Cloud (macro-intelligence):** **ModelArts** ingests anonymized metadata from every node,
-  learns city-wide patterns, and trains the master MARL model that coordinates Green Waves
-  across whole corridors.
+- **Edge:** a **Huawei Atlas 500** box at each intersection runs the trained policy on the live
+  video and makes decisions in under 200 ms.
+- **Cloud:** ModelArts collects anonymized data from every intersection, learns city-wide
+  patterns, and trains the main MARL model that coordinates green waves along whole corridors.
 
-The data plane keeps the two honest: edge nodes stream anonymized metadata through **DIS**,
-which fans out to **Cloud Stream** for real-time dashboard metrics and dumps to **OBS** as a
-historical data lake; **MRS** batch-processes OBS for long-term trend reports, and **IoTDA**
-manages device authentication and reports node health. Privacy is handled at the edge —
-video is processed locally and never stored; only aggregated, anonymized metadata leaves
-over an encrypted, IoTDA-authenticated connection.
+Video is processed at the intersection and never stored; only anonymized data is sent to the
+cloud, where it feeds live dashboards and long-term reports.
 
-The piece I'm proudest of is the **CI/CD/CT (Continuous Integration / Deployment / Training)**
-loop. ModelArts retrains nightly on the day's fresh data; the new model is pushed by **IEF
-(Intelligent EdgeFabric)**, which runs a **Blue-Green deployment** on each Atlas box — start
-the new container alongside the old, validate it, swap the connection instantly, retire the
-old one. The grid gets measurably smarter every 24 hours with zero downtime.
+The model also keeps improving. Every night ModelArts retrains on that day's data, and the new
+model is rolled out to each Atlas box with a **blue-green deployment**: the new version starts
+next to the old one, gets checked, and then takes over, so there's no downtime.
 
 {/* TODO (technical depth): the MARL specifics worth naming — the per-agent observation,
 the action space (phase selection vs. green-time duration), the reward shaping, and the
@@ -99,17 +83,16 @@ stable under the clock, and what you cut to make the finals. A cloud-edge diagra
 
 ## Outcome
 
-Alongside the technical demo we made the commercial case: delivered as TMaaS, the platform
-turns a large upfront CAPEX project into a predictable subscription, which is what makes it
-adoptable for cash-constrained cities. We closed on the live demo.
+In simulation, the MARL agents moved **6× more vehicles** than a fixed-cycle baseline, and the
+edge-cloud setup ran **about 73% faster** than a cloud-only one, which is what makes real-time
+green waves and emergency priority possible.
+
+We also made the business case. Sold as a subscription, TMaaS turns a large upfront
+infrastructure cost into a predictable monthly one, which makes it easier for cities with tight
+budgets to adopt. We closed the pitch with the live demo.
 
 {/* TODO: the room itself — Hong Kong, PolyU, a judge question you remember, how the demo
 landed. This is the part that makes the Grand Finalist result feel real. */}
-
-In simulation, the MARL agents processed **6× more vehicles** than a traditional
-fixed-cycle baseline, and the edge-cloud architecture ran **~73% faster** than a cloud-only
-setup — the latency headroom that makes real-time Green Waves and emergency prioritization
-possible. 
 
 It is unfortunate that we were unable to make it to the podium, other teams such as the startup teams already had real-world implementations 
 and better business models, while others had real use-cases. I feel that's where we fall short, as we were still students without any real 
